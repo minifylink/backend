@@ -23,6 +23,7 @@ require (
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
+	github.com/mssola/user_agent v0.6.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/net v0.34.0 // indirect

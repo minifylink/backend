@@ -1,6 +1,7 @@
 package main
 
 import (
+	"backend/internal/http-server/handler/link/redirect"
 	"backend/internal/http-server/handler/link/save"
 	"context"
 	"github.com/go-chi/chi/v5"

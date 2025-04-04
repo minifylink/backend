@@ -20,4 +20,7 @@ jobs:
           script: |
             cd backend
             git pull origin main
+            
+            docker-compose down --remove-orphans
+            
             docker-compose up -d --build

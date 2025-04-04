@@ -38,7 +38,6 @@ services:
     ports:
       - "5432:5432"
 
-  # Сервис для тестирования соединения с базой данных
   db-test:
     image: postgres:17-alpine
     container_name: db-test
@@ -71,12 +70,49 @@ services:
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
       - HTTP_SERVER_PASSWORD=${HTTP_SERVER_PASSWORD:-changeme}
+      - VIRTUAL_HOST=шайтанкод.рф
+      - LETSENCRYPT_HOST=шайтанкод.рф
+      - LETSENCRYPT_EMAIL=поддержка@шайтанкод.рф
     volumes:
       - ./config:/app/config
     networks:
       - internal_net
+      - nginx_proxy
+    expose:
+      - "8082"
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx_proxy
+    restart: always
     ports:
-      - "8082:8082"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - certs:/etc/nginx/certs:ro
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - ./nginx-data:/etc/nginx/conf.d
+    networks:
+      - nginx_proxy
+
+  nginx-letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx_letsencrypt
+    restart: always
+    environment:
+      - DEFAULT_EMAIL=поддержка@шайтанкод.рф
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - certs:/etc/nginx/certs
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - acme:/etc/acme.sh
+    networks:
+      - nginx_proxy
+    depends_on:
+      - nginx-proxy
 
 volumes:
   postgres_data:

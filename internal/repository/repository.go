@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	saveURLQuery = `INSERT INTO links (original_url, short_id, created_at) 
-               VALUES ($1, $2, NOW()) RETURNING id`
-	getURLQuery        = `SELECT id, original_url FROM links WHERE short_id = $1`
+	saveLinkQuery = `INSERT INTO links (original_link, short_id, created_at) 
+               VALUES ($1, $2, NOW())`
+	getLinkQuery       = `SELECT id, original_link FROM links WHERE short_id = $1`
 	saveAnalyticsQuery = `INSERT INTO analytics (link_id, timestamp, country, device, browser) 
                     VALUES ($1, NOW(), $2, $3, $4)`
 )
@@ -33,7 +33,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Storage, error) {
 	const op = "storage.postgres.New"
 	logger := log.With(slog.String("op", op))
 	logger.Info("connecting to db")
-	db, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+	db, err := sql.Open("pgx", fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		cfg.PostgresConfig.Host,
 		cfg.PostgresConfig.Port,
 		cfg.PostgresConfig.Username,
@@ -46,7 +46,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Storage, error) {
 
 	stmt, err := db.Prepare("CREATE TABLE IF NOT EXISTS links (" +
 		"id SERIAL PRIMARY KEY, " +
-		"original_url TEXT NOT NULL, " +
+		"original_link TEXT NOT NULL, " +
 		"short_id VARCHAR(20) NOT NULL UNIQUE, " +
 		"created_at TIMESTAMP NOT NULL DEFAULT now())")
 
@@ -95,28 +95,27 @@ func New(cfg *config.Config, log *slog.Logger) (*Storage, error) {
 	return &Storage{db: db, log: log}, nil
 }
 
-func (s *Storage) SaveURL(originalURL string, shortID string) (int64, error) {
-	const op = "repository.SaveURL"
+func (s *Storage) SaveLink(originalLink string, shortID string) error {
+	const op = "repository.SaveLink"
 	logger := s.log.With(slog.String("op", op))
 
-	var id int64
-	err := s.db.QueryRow(saveURLQuery, originalURL, shortID).Scan(&id)
+	_, err := s.db.Exec(saveLinkQuery, originalLink, shortID)
 	if err != nil {
 		if err.Error() == "pq: duplicate key value violates unique constraint \"links_short_id_key\"" {
 			logger.Error("short id already exists", slog.String("error", err.Error()))
-			return 0, fmt.Errorf("%s: short id already exists", op)
+			return fmt.Errorf("%s: short id already exists", op)
 		}
 
-		logger.Error("failed to save url", slog.String("error", err.Error()))
-		return 0, fmt.Errorf("%s: %w", op, err)
+		logger.Error("failed to save link", slog.String("error", err.Error()))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	logger.Info("url successfully saved", slog.Int64("id", id))
-	return id, nil
+	logger.Info("Link successfully saved")
+	return nil
 }
 
-func (s *Storage) GetURL(shortID string, country, device, browser string) (string, error) {
-	const op = "repository.GetURL"
+func (s *Storage) GetLink(shortID string, country, device, browser string) (string, error) {
+	const op = "repository.GetLink"
 	logger := s.log.With(slog.String("op", op))
 
 	tx, err := s.db.Begin()
@@ -132,16 +131,16 @@ func (s *Storage) GetURL(shortID string, country, device, browser string) (strin
 	}()
 
 	var linkID int64
-	var originalURL string
+	var originalLink string
 
-	err = tx.QueryRow(getURLQuery, shortID).Scan(&linkID, &originalURL)
+	err = tx.QueryRow(getLinkQuery, shortID).Scan(&linkID, &originalLink)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			logger.Error("url not found", slog.String("short_id", shortID))
-			return "", fmt.Errorf("%s: url not found", op)
+			logger.Error("link not found", slog.String("short_id", shortID))
+			return "", fmt.Errorf("%s: link not found", op)
 		}
 
-		logger.Error("failed to get url", slog.String("error", err.Error()))
+		logger.Error("failed to get link", slog.String("error", err.Error()))
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -157,7 +156,7 @@ func (s *Storage) GetURL(shortID string, country, device, browser string) (strin
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	return originalURL, nil
+	return originalLink, nil
 }
 
 func (s *Storage) GetStatistic(shortID string) (*StatisticResponse, error) {

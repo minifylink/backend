@@ -26,6 +26,7 @@ type Response struct {
 
 const shortIDLength = 6
 
+//go:generate go run github.com/vektra/mockery/v2 --name=LinkSaver
 type LinkSaver interface {
 	SaveLink(linkToSave string, shortID string) error
 }
@@ -50,7 +51,7 @@ func New(log *slog.Logger, linkSaver LinkSaver) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			log.Error("failed to decode request body", err)
+			log.Error("failed to decode request body", slog.String("error", err.Error()))
 
 			render.JSON(w, r, resp.Error("failed to decode request"))
 
@@ -63,7 +64,7 @@ func New(log *slog.Logger, linkSaver LinkSaver) http.HandlerFunc {
 		if err := validate.Struct(req); err != nil {
 			validateErr := err.(validator.ValidationErrors)
 
-			log.Error("invalid request", err)
+			log.Error("invalid request", slog.String("error", err.Error()))
 
 			render.JSON(w, r, resp.ValidationError(validateErr))
 
@@ -85,7 +86,7 @@ func New(log *slog.Logger, linkSaver LinkSaver) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			log.Error("failed to add link", err)
+			log.Error("failed to add link", slog.String("error", err.Error()))
 
 			render.JSON(w, r, resp.Error("failed to add link"))
 

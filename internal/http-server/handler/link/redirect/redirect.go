@@ -2,18 +2,22 @@ package redirect
 
 import (
 	"encoding/json"
-	"github.com/mssola/user_agent"
 	"net/http"
+
+	"github.com/mssola/user_agent"
+
+	"log/slog"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
-	"log/slog"
 
 	resp "backend/internal/lib/api/response"
 )
 
 // LinkGetter is an interface for getting link by alias.
+
+//go:generate go run github.com/vektra/mockery/v2 --name=LinkGetter
 type LinkGetter interface {
 	GetLink(alias string, country, device, browser string) (string, error)
 }
@@ -57,7 +61,7 @@ func New(log *slog.Logger, linkGetter LinkGetter) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			log.Error("failed to get link", err)
+			log.Error("failed to get link", slog.String("error", err.Error()))
 
 			render.JSON(w, r, resp.Error("internal error"))
 

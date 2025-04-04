@@ -70,7 +70,6 @@ services:
       - .env
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
-      - HTTP_SERVER_PASSWORD=${HTTP_SERVER_PASSWORD:-changeme}
     volumes:
       - ./config:/app/config
     networks:

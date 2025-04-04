@@ -27,7 +27,6 @@ COPY config/ /app/config/
 RUN mkdir -p /app/data
 
 ENV CONFIG_PATH=/app/config/prod.yaml
-# HTTP_SERVER_PASSWORD будет передан через docker-compose или при запуске контейнера
 
 EXPOSE 8082
 

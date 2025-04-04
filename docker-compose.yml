@@ -38,6 +38,7 @@ services:
     ports:
       - "5432:5432"
 
+  # Сервис для тестирования соединения с базой данных
   db-test:
     image: postgres:17-alpine
     container_name: db-test

@@ -1,0 +1,7 @@
+FROM postgres:17-alpine
+
+# Копируем скрипт инициализации базы данных
+COPY docker/init-db.sh /docker-entrypoint-initdb.d/
+
+# Устанавливаем права на выполнение скрипта
+RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh 

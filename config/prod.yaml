@@ -5,3 +5,12 @@ http_server:
   timeout: 4s
   idle_timeout: 30s
   user: "test"
+  # password будет установлен через переменную окружения HTTP_SERVER_PASSWORD
+
+postgres:
+  host: "postgres"  # Должно совпадать с именем сервиса или его alias в docker-compose
+  port: "5432"
+  username: "postgres"
+  password: "postgres"
+  db_name: "shortener"
+  ssl_mode: "disable"

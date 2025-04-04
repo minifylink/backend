@@ -2,6 +2,7 @@ package main
 
 import (
 	"backend/internal/config"
+	"backend/internal/repository"
 	"log/slog"
 	"os"
 )
@@ -17,7 +18,13 @@ func main() {
 
 	log := setupLogger(cfg.Env)
 
-	_ = log
+	storage, err := repository.New(cfg, log)
+	if err != nil {
+		log.Error("failed to init storage", err)
+		os.Exit(1)
+	}
+
+	_ = storage
 }
 
 func setupLogger(env string) *slog.Logger {

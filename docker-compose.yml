@@ -10,23 +10,73 @@ networks:
 
 services:
   postgres:
-    image: postgres:17-alpine
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
     container_name: postgres
     restart: always
     env_file:
       - .env
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-shortener}
     volumes:
       - postgres_data:/var/lib/postgresql/data/pgdata
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
-      - internal_net
+      internal_net:
+        aliases:
+          - postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-shortener}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    ports:
+      - "5432:5432"
+
+  # Сервис для тестирования соединения с базой данных
+  db-test:
+    image: postgres:17-alpine
+    container_name: db-test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-shortener}
+    volumes:
+      - ./docker/test-db-connection.sh:/test-db-connection.sh
+    networks:
+      - internal_net
+    command: /test-db-connection.sh
+    profiles:
+      - debug
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minifylink
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - CONFIG_PATH=/app/config/prod.yaml
+      - HTTP_SERVER_PASSWORD=${HTTP_SERVER_PASSWORD:-changeme}
+    volumes:
+      - ./config:/app/config
+    networks:
+      - internal_net
+    ports:
+      - "8082:8082"
 
 volumes:
   postgres_data:

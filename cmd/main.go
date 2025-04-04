@@ -3,6 +3,7 @@ package main
 import (
 	"backend/internal/http-server/handler/link/redirect"
 	"backend/internal/http-server/handler/link/save"
+	"backend/internal/http-server/handler/link/statistic"
 	"context"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"

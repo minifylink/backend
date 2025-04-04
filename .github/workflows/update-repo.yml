@@ -20,4 +20,10 @@ jobs:
           script: |
             cd backend
             git pull origin main
+            
+            # Останавливаем и удаляем контейнеры перед запуском
+            # Это помогает избежать ошибки 'ContainerConfig' при перезапуске контейнеров
+            docker-compose down --remove-orphans
+            
+            # Запускаем docker-compose с пересборкой
             docker-compose up -d --build

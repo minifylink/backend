@@ -117,3 +117,7 @@ services:
 volumes:
   postgres_data:
     driver: local
+  certs:
+  vhost:
+  html:
+  acme:

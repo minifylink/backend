@@ -79,6 +79,12 @@ services:
       - nginx_proxy
     expose:
       - "8082"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8082" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   nginx-proxy:
     image: jwilder/nginx-proxy
@@ -97,6 +103,11 @@ services:
       - nginx_proxy
     labels:
       - com.github.nginx-proxy.nginx-proxy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   nginx-letsencrypt:
     image: jrcs/letsencrypt-nginx-proxy-companion
@@ -114,6 +125,11 @@ services:
       - nginx_proxy
     depends_on:
       - nginx-proxy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data:

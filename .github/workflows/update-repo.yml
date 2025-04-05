@@ -25,37 +25,6 @@ jobs:
             
             docker-compose up -d --build
 
-      - name: Check docker container ready
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            docker ps -a
-            docker logs postgres || { echo "Postgres не запустился"; exit 1; }
-            docker logs minifylink || { echo "Backend не запустился"; exit 1; }
-            docker logs nginx_proxy || { echo "nginx_proxy не запустился"; exit 1; }
-            docker logs nginx_letsencrypt || { echo "nginx_letsencrypt не запустился"; exit 1; }
-            
-            POSTGRES_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' postgres)
-            BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
-            NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
-            NGINX_LETSENCRYPT_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_letsencrypt)
-            
-            if [[ "$POSTGRES_HEALTH" != "healthy" ]]; then
-              echo "Postgres не в состоянии healthy"; exit 1;
-            fi
-            if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
-              echo "Backend не в состоянии healthy"; exit 1;
-            fi
-            if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
-              echo "nginx_proxy не в состоянии healthy"; exit 1;
-            fi
-            if [[ "$NGINX_LETSENCRYPT_HEALTH" != "healthy" ]]; then
-              echo "nginx_letsencrypt не в состоянии healthy"; exit 1;
-            fi
-
   check_health:
     runs-on: ubuntu-latest
     needs: update

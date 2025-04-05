@@ -1,4 +1,4 @@
-name: Update Repo
+name: Update
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  update-repo:
+  update:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -37,21 +37,114 @@ jobs:
             docker logs minifylink || { echo "Backend не запустился"; exit 1; }
             docker logs nginx_proxy || { echo "nginx_proxy не запустился"; exit 1; }
             docker logs nginx_letsencrypt || { echo "nginx_letsencrypt не запустился"; exit 1; }
-  
+            
             POSTGRES_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' postgres)
             BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
             NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
             NGINX_LETSENCRYPT_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_letsencrypt)
-  
+            
             if [[ "$POSTGRES_HEALTH" != "healthy" ]]; then
-              echo "Postgres не в состоянии healthy!"; exit 1;
+              echo "Postgres не в состоянии healthy"; exit 1;
             fi
             if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
-              echo "Backend не в состоянии healthy!"; exit 1;
+              echo "Backend не в состоянии healthy"; exit 1;
             fi
             if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
-              echo "nginx_proxy не в состоянии healthy!"; exit 1;
+              echo "nginx_proxy не в состоянии healthy"; exit 1;
             fi
             if [[ "$NGINX_LETSENCRYPT_HEALTH" != "healthy" ]]; then
-              echo "nginx_letsencrypt не в состоянии healthy!"; exit 1;
+              echo "nginx_letsencrypt не в состоянии healthy"; exit 1;
             fi
+
+  check_health:
+    runs-on: ubuntu-latest
+    needs: update
+    timeout-minutes: 10
+
+    steps:
+      - name: Check docker container ready
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker ps -a
+            docker logs postgres || { echo "Postgres не запустился"; exit 1; }
+            docker logs minifylink || { echo "Backend не запустился"; exit 1; }
+            docker logs nginx_proxy || { echo "nginx_proxy не запустился"; exit 1; }
+            docker logs nginx_letsencrypt || { echo "nginx_letsencrypt не запустился"; exit 1; }
+
+            POSTGRES_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' postgres)
+            BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
+            NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
+            NGINX_LETSENCRYPT_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_letsencrypt)
+
+            if [[ "$POSTGRES_HEALTH" != "healthy" ]]; then
+              echo "Postgres не в состоянии healthy"; exit 1;
+            fi
+            if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
+              echo "Backend не в состоянии healthy"; exit 1;
+            fi
+            if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
+              echo "nginx_proxy не в состоянии healthy"; exit 1;
+            fi
+            if [[ "$NGINX_LETSENCRYPT_HEALTH" != "healthy" ]]; then
+              echo "nginx_letsencrypt не в состоянии healthy"; exit 1;
+            fi
+
+      - name: Check Postgres connection
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+            
+            try_until_success() {
+              local message=$1
+              while true; do
+                psql -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c '\q' && return 0
+                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                  echo "$message"
+                  exit 1
+                fi
+                echo "Попытка подключения к Postgres не удалась, повторяю..."
+                sleep $INTERVAL
+              done
+            }
+            
+            try_until_success "Postgres не доступен"
+
+      - name: Check HTTP server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+            
+            try_until_success() {
+              local url=$1
+              local message=$2
+              while true; do
+                curl -f "$url" && return 0
+                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                  echo "$message"
+                  exit 1
+                fi
+                echo "Попытка подключения к $url не удалась, повторяю..."
+                sleep $INTERVAL
+              done
+            }
+            
+            try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
+            try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
+            try_until_success "http://шайтанкод.рф" "HTTP сервер не доступен"
+            try_until_success "https://шайтанкод.рф" "HTTPS сервер не доступен"

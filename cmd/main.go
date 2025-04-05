@@ -55,6 +55,10 @@ func main() {
 
 	router.Get("/{minilink}", redirect.New(log, storage))
 
+	router.HandleFunc("/healthy", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
 	log.Info("starting server", slog.String("address", cfg.Address))
 
 	done := make(chan os.Signal, 1)

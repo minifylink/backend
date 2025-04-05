@@ -40,26 +40,6 @@ services:
     ports:
       - "5432:5432"
 
-  db-test:
-    image: postgres:17-alpine
-    container_name: db-test
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-shortener}
-    volumes:
-      - ./docker/test-db-connection.sh:/test-db-connection.sh
-    networks:
-      - internal_net
-    command: /test-db-connection.sh
-    profiles:
-      - debug
-
   backend:
     build:
       context: .

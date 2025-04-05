@@ -4,14 +4,14 @@ set -e
 echo "Ожидание готовности PostgreSQL..."
 sleep 5
 
-for i in $(seq 1 30); do
-  if PGPASSWORD=${POSTGRES_PASSWORD} psql -h postgres -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "SELECT 1" >/dev/null 2>&1; then
-    echo "Подключение к PostgreSQL успешно!"
+for i in $(seq 1 5); do
+  if docker exec postgres pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}; then
+    echo "PostgreSQL сервер доступен!"
     exit 0
   fi
-  echo "Попытка подключения к Postgres не удалась, повторяю... ($i/30)"
+  echo "Попытка подключения к PostgreSQL не удалась, повторяю... ($i/5)"
   sleep 2
 done
 
-echo "Postgres не доступен"
+echo "PostgreSQL сервер не доступен"
 exit 1

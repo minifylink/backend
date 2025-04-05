@@ -1,15 +1,18 @@
 #!/bin/bash
 set -e
 
-# Отладочная информация
 echo "Initializing database: $POSTGRES_DB with user: $POSTGRES_USER"
 
-# Создаем базу данных, если она не существует
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
-  SELECT 'CREATE DATABASE $POSTGRES_DB' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$POSTGRES_DB')\gexec
+  DO \$\$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '$POSTGRES_DB') THEN
+      CREATE DATABASE "$POSTGRES_DB";
+    END IF;
+  END
+  \$\$;
 EOSQL
 
-# Создаем таблицы в базе данных
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
   CREATE TABLE IF NOT EXISTS links (
     id SERIAL PRIMARY KEY,
@@ -34,4 +37,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   );
 EOSQL
 
-echo "Database initialization completed successfully" 
+echo "Database initialization completed successfully"

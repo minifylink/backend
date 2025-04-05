@@ -53,6 +53,8 @@ services:
       - .env
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
+      - VIRTUAL_HOST=localhost
+      - VIRTUAL_PORT=8082
     volumes:
       - ./config:/app/config
       - ./.env:/app/.env
@@ -61,6 +63,8 @@ services:
       - nginx_proxy
     expose:
       - "8082"
+    ports:
+      - "8082:8082"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8082/healthy" ]
       interval: 10s
@@ -91,32 +95,9 @@ services:
       timeout: 5s
       retries: 3
 
-  nginx-letsencrypt:
-    image: jrcs/letsencrypt-nginx-proxy-companion
-    container_name: nginx_letsencrypt
-    restart: always
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx_proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - certs:/etc/nginx/certs
-      - vhost:/etc/nginx/vhost.d
-      - html:/usr/share/nginx/html
-      - acme:/etc/acme.sh
-    networks:
-      - nginx_proxy
-    depends_on:
-      - nginx-proxy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost" ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
 volumes:
   postgres_data:
     driver: local
   certs:
   vhost:
   html:
-  acme:

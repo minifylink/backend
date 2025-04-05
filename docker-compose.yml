@@ -40,7 +40,6 @@ services:
     ports:
       - "5432:5432"
 
-  # Сервис для тестирования соединения с базой данных
   db-test:
     image: postgres:17-alpine
     container_name: db-test
@@ -72,9 +71,6 @@ services:
       - .env
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
-      - VIRTUAL_HOST=шайтанкод.рф
-      - LETSENCRYPT_HOST=шайтанкод.рф
-      - LETSENCRYPT_EMAIL=поддержка@шайтанкод.рф
     volumes:
       - ./config:/app/config
     networks:
@@ -106,7 +102,6 @@ services:
     container_name: nginx_letsencrypt
     restart: always
     environment:
-      - DEFAULT_EMAIL=поддержка@шайтанкод.рф
       - NGINX_PROXY_CONTAINER=nginx_proxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

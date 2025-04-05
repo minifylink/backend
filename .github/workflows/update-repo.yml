@@ -45,7 +45,7 @@ jobs:
             try_until_success() {
               local message=$1
               while true; do
-                psql -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c '\q' && return 0
+                psql -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB} " -c '\q' && return 0
                 if (( $(date +%s) - START_TIME >= TIMEOUT )); then
                   echo "$message"
                   docker logs postgres || echo "Postgres не запустился";
@@ -127,8 +127,6 @@ jobs:
 
             try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
             try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
-            try_until_success "http://шайтанкод.рф" "HTTP сервер не доступен"
-            try_until_success "https://шайтанкод.рф" "HTTPS сервер не доступен"
 
   check_nginx_letsencrypt:
     runs-on: ubuntu-latest

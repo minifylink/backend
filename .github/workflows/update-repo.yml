@@ -37,7 +37,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd backend
-            bash test-db-connection.sh
+            bash ./docker/test-db-connection.sh
 
   check_backend:
     runs-on: ubuntu-latest

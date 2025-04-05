@@ -43,6 +43,8 @@ services:
   db-test:
     image: postgres:17-alpine
     container_name: db-test
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy

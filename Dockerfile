@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY .env ./
 
-RUN apk add --no-cache git build-base
+RUN apk add --no-cache git build-base curl
 
 COPY go.mod go.sum ./
 RUN go mod download

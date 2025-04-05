@@ -80,7 +80,7 @@ services:
     expose:
       - "8082"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8082" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8082/healthy" ]
       interval: 10s
       timeout: 5s
       retries: 3

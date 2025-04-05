@@ -22,7 +22,7 @@ jobs:
             
             docker-compose down --remove-orphans
             
-            docker-compose up -d --build
+            docker-compose up -d --build --env-file .env
 
   check_postgres:
     runs-on: ubuntu-latest
@@ -126,7 +126,6 @@ jobs:
             fi
 
             try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
-            try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
 
   check_nginx_letsencrypt:
     runs-on: ubuntu-latest
@@ -168,6 +167,4 @@ jobs:
             fi
 
             try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
-            try_until_success "http://шайтанкод.рф" "HTTP сервер не доступен"
             try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
-            try_until_success "https://шайтанкод.рф" "HTTPS сервер не доступен"

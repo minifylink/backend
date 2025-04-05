@@ -73,6 +73,7 @@ services:
       - CONFIG_PATH=/app/config/prod.yaml
     volumes:
       - ./config:/app/config
+      - ./.env:/app/.env
     networks:
       - internal_net
       - nginx_proxy

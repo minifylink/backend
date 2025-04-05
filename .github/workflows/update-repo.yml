@@ -22,6 +22,12 @@ jobs:
             
             docker-compose down --remove-orphans
             
+            openssl req -x509 -nodes -days 365 \
+                -newkey rsa:2048 \
+                -keyout nginx-data/certs/localhost.key \
+                -out nginx-data/certs/localhost.crt \
+                -subj "/CN=localhost"
+            
             docker-compose up -d --build
 
   check_postgres:

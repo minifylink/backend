@@ -90,6 +90,7 @@ services:
       - vhost:/etc/nginx/vhost.d
       - html:/usr/share/nginx/html
       - ./nginx-data:/etc/nginx/conf.d
+      - ./nginx-data/certs:/etc/nginx/certs:ro
     networks:
       - nginx_proxy
     labels:

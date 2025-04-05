@@ -1,15 +1,17 @@
 #!/bin/sh
 set -e
 
-echo "Testing database connection..."
+echo "Ожидание готовности PostgreSQL..."
+sleep 5
 
-# Ждем, пока PostgreSQL станет доступным
-until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c '\q'; do
-  >&2 echo "PostgreSQL is unavailable - sleeping"
-  sleep 1
+for i in $(seq 1 30); do
+  if PGPASSWORD=${POSTGRES_PASSWORD} psql -h postgres -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "SELECT 1" >/dev/null 2>&1; then
+    echo "Подключение к PostgreSQL успешно!"
+    exit 0
+  fi
+  echo "Попытка подключения к Postgres не удалась, повторяю... ($i/30)"
+  sleep 2
 done
 
-echo "PostgreSQL is up - executing query"
-PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT 'PostgreSQL connection successful' as status;"
-
-echo "Database connection test completed" 
+echo "Postgres не доступен"
+exit 1

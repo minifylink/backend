@@ -37,34 +37,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd backend
-            
-            TIMEOUT=60
-            INTERVAL=10
-            START_TIME=$(date +%s)
-            
-            try_until_success() {
-              local message=$1
-              while true; do
-                psql -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB} " -c '\q' && return 0
-                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
-                  echo "$message"
-                  docker logs postgres || echo "Postgres не запустился";
-                  exit 1
-                fi
-                echo "Попытка подключения к Postgres не удалась, повторяю..."
-                sleep $INTERVAL
-              done
-            }
-            
-            POSTGRES_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' postgres)
-            
-            if [[ "$POSTGRES_HEALTH" != "healthy" ]]; then
-              echo "Postgres не в состоянии healthy";
-              docker logs postgres || echo "Postgres не запустился";
-              exit 1;
-            fi
-            
-            try_until_success "Postgres не доступен"
+            bash test-db-connection.sh
 
   check_backend:
     runs-on: ubuntu-latest
@@ -132,7 +105,7 @@ jobs:
     needs: check_backend
     timeout-minutes: 10
     steps:
-      - name: Check HTTP server
+      - name: Check HTTPS server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.DEPLOY_HOST }}

@@ -22,11 +22,7 @@ WORKDIR /app
 
 COPY --from=builder /app/backend .
 
-COPY config/ /app/config/
-
 RUN mkdir -p /app/data
-
-ENV CONFIG_PATH=/app/config/prod.yaml
 
 EXPOSE 8082
 

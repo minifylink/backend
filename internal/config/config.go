@@ -5,46 +5,51 @@ import (
 	"os"
 	"time"
 
-	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/joho/godotenv"
+	"github.com/kelseyhightower/envconfig"
 )
 
 type Config struct {
-	Env            string `yaml:"env" env-default:"local"`
-	PostgresConfig `yaml:"postgres"`
-	HTTPServer     `yaml:"http_server"`
+	Env string `envconfig:"ENV" default:"local"`
+	PostgresConfig
+	HTTPServer
 }
 
 type PostgresConfig struct {
-	Host     string `yaml:"host"`
-	Port     string `yaml:"port"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	DBName   string `yaml:"db_name"`
-	SSLMode  string `yaml:"ssl_mode"`
+	Host     string `envconfig:"POSTGRES_HOST" default:"postgres"`
+	Port     string `envconfig:"POSTGRES_PORT" default:"5432"`
+	Username string `envconfig:"POSTGRES_USER" default:"postgres"`
+	Password string `envconfig:"POSTGRES_PASSWORD" default:"postgres"`
+	DBName   string `envconfig:"POSTGRES_DB" default:"shortener"`
+	SSLMode  string `envconfig:"POSTGRES_SSL_MODE" default:"disable"`
 }
+
 type HTTPServer struct {
-	Address     string        `yaml:"address" env-default:"localhost:8080"`
-	Timeout     time.Duration `yaml:"timeout" env-default:"4s"`
-	IdleTimeout time.Duration `yaml:"idle_timeout" env-default:"60s"`
-	User        string        `yaml:"user" env-required:"true"`
-	Password    string        `yaml:"password" env-required:"true" env:"HTTP_SERVER_PASSWORD"`
+	Address     string        `envconfig:"HTTP_SERVER_ADDRESS" default:"0.0.0.0:8082"`
+	Timeout     time.Duration `envconfig:"HTTP_SERVER_TIMEOUT" default:"4s"`
+	IdleTimeout time.Duration `envconfig:"HTTP_SERVER_IDLE_TIMEOUT" default:"60s"`
+}
+
+func LoadEnv() {
+	envFile := os.Getenv("ENV_FILE")
+	if envFile == "" {
+		envFile = ".env"
+	}
+
+	err := godotenv.Load(envFile)
+	if err != nil {
+		log.Printf("Warning: could not load .env file: %v", err)
+	}
 }
 
 func MustLoad() *Config {
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		log.Fatal("CONFIG_PATH is not set")
-	}
-
-	// check if file exists
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		log.Fatalf("config file does not exist: %s", configPath)
-	}
+	LoadEnv()
 
 	var cfg Config
 
-	if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
-		log.Fatalf("cannot read config: %s", err)
+	err := envconfig.Process("", &cfg)
+	if err != nil {
+		log.Fatalf("Failed to process config: %v", err)
 	}
 
 	return &cfg

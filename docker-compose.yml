@@ -62,14 +62,12 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: minifylink
-    restart: always
+#    restart: always
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
       - .env
-    environment:
-      - CONFIG_PATH=/app/config/prod.yaml
     volumes:
       - ./config:/app/config
     networks:

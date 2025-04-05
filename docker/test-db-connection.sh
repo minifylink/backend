@@ -5,7 +5,7 @@ echo "Ожидание готовности PostgreSQL..."
 sleep 5
 
 for i in $(seq 1 5); do
-  if pg_isready -h postgres -U ${POSTGRES_USER} -d ${POSTGRES_DB}; then
+  if pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}; then
     echo "PostgreSQL сервер доступен!"
     exit 0
   fi

@@ -98,6 +98,8 @@ services:
       - ./nginx-data:/etc/nginx/conf.d
     networks:
       - nginx_proxy
+    labels:
+      - com.github.nginx-proxy.nginx-proxy
 
   nginx-letsencrypt:
     image: jrcs/letsencrypt-nginx-proxy-companion
@@ -105,6 +107,7 @@ services:
     restart: always
     environment:
       - DEFAULT_EMAIL=поддержка@шайтанкод.рф
+      - NGINX_PROXY_CONTAINER=nginx_proxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - certs:/etc/nginx/certs

@@ -22,7 +22,7 @@ jobs:
             
             docker-compose down --remove-orphans
             
-            docker-compose up -d --build --env-file .env
+            docker-compose up -d --build
 
   check_postgres:
     runs-on: ubuntu-latest

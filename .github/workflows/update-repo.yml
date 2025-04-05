@@ -30,6 +30,9 @@ jobs:
                 -out nginx-data/certs/localhost.crt \
                 -subj "/CN=localhost"
             
+            sudo chmod 644 ./nginx-data/certs/localhost.key
+            sudo chmod 644 ./nginx-data/certs/localhost.crt
+            
             docker-compose up -d --build
 
   check_postgres:

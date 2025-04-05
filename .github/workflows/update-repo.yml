@@ -1,4 +1,4 @@
-name: Update Repo
+name: Update
 
 on:
   push:
@@ -6,10 +6,9 @@ on:
       - main
 
 jobs:
-  update-repo:
+  update:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Deploy to server
         uses: appleboy/ssh-action@master
@@ -24,3 +23,153 @@ jobs:
             docker-compose down --remove-orphans
             
             docker-compose up -d --build
+
+  check_postgres:
+    runs-on: ubuntu-latest
+    needs: update
+    timeout-minutes: 10
+    steps:
+      - name: Check Postgres connection
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
+            
+            TIMEOUT=60
+            INTERVAL=10
+            START_TIME=$(date +%s)
+            
+            try_until_success() {
+              local message=$1
+              while true; do
+                psql -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c '\q' && return 0
+                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                  echo "$message"
+                  docker logs postgres || echo "Postgres не запустился";
+                  exit 1
+                fi
+                echo "Попытка подключения к Postgres не удалась, повторяю..."
+                sleep $INTERVAL
+              done
+            }
+            
+            POSTGRES_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' postgres)
+            
+            if [[ "$POSTGRES_HEALTH" != "healthy" ]]; then
+              echo "Postgres не в состоянии healthy";
+              docker logs postgres || echo "Postgres не запустился";
+              exit 1;
+            fi
+            
+            try_until_success "Postgres не доступен"
+
+  check_backend:
+    runs-on: ubuntu-latest
+    needs: update
+    timeout-minutes: 10
+    steps:
+      - name: Check HTTP server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
+
+            if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
+              echo "Backend не в состоянии healthy";
+              docker logs minifylink || echo "Backend не запустился";
+              exit 1;
+            fi
+
+  check_nginx:
+    runs-on: ubuntu-latest
+    needs: check_backend
+    timeout-minutes: 10
+    steps:
+      - name: Check HTTP server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+
+            try_until_success() {
+              local url=$1
+              local message=$2
+              while true; do
+                curl -f "$url" && return 0
+                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                  echo "$message"
+                  docker logs nginx_letsencrypt || echo "nginx_letsencrypt не запустился";
+                  exit 1
+                fi
+                echo "Попытка подключения к $url не удалась, повторяю..."
+                sleep $INTERVAL
+              done
+            }
+
+            NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
+
+            if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
+              echo "nginx_proxy не в состоянии healthy";
+              docker logs nginx_proxy || echo "nginx_proxy не запустился";
+              exit 1;
+            fi
+
+            try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
+            try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
+            try_until_success "http://шайтанкод.рф" "HTTP сервер не доступен"
+            try_until_success "https://шайтанкод.рф" "HTTPS сервер не доступен"
+
+  check_nginx_letsencrypt:
+    runs-on: ubuntu-latest
+    needs: check_backend
+    timeout-minutes: 10
+    steps:
+      - name: Check HTTP server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+
+            try_until_success() {
+              local url=$1
+              local message=$2
+              while true; do
+                curl -f "$url" && return 0
+                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                  echo "$message"
+                  docker logs nginx_letsencrypt || echo "nginx_letsencrypt не запустился";
+                  exit 1
+                fi
+                echo "Попытка подключения к $url не удалась, повторяю..."
+                sleep $INTERVAL
+              done
+            }
+
+            NGINX_LETSENCRYPT_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_letsencrypt)
+
+            if [[ "$NGINX_LETSENCRYPT_HEALTH" != "healthy" ]]; then
+              echo "nginx_letsencrypt не в состоянии healthy";
+              docker logs nginx_letsencrypt || echo "nginx_letsencrypt не запустился";
+              exit 1;
+            fi
+
+            try_until_success "http://localhost:8082" "HTTP сервер на порту 8082 не доступен"
+            try_until_success "http://шайтанкод.рф" "HTTP сервер не доступен"
+            try_until_success "https://localhost:8082" "HTTPS сервер на порту 8082 не доступен"
+            try_until_success "https://шайтанкод.рф" "HTTPS сервер не доступен"

@@ -7,6 +7,8 @@ networks:
       driver: default
       config:
         - subnet: 172.28.0.0/16
+  nginx_proxy:
+    driver: bridge
 
 services:
   postgres:
@@ -62,19 +64,64 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: minifylink
-#    restart: always
+    restart: always
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      - VIRTUAL_HOST=шайтанкод.рф
+      - LETSENCRYPT_HOST=шайтанкод.рф
+      - LETSENCRYPT_EMAIL=поддержка@шайтанкод.рф
     volumes:
       - ./config:/app/config
     networks:
       - internal_net
+      - nginx_proxy
+    expose:
+      - "8082"
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx_proxy
+    restart: always
     ports:
-      - "8082:8082"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - certs:/etc/nginx/certs:ro
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - ./nginx-data:/etc/nginx/conf.d
+    networks:
+      - nginx_proxy
+    labels:
+      - com.github.nginx-proxy.nginx-proxy
+
+  nginx-letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx_letsencrypt
+    restart: always
+    environment:
+      - DEFAULT_EMAIL=поддержка@шайтанкод.рф
+      - NGINX_PROXY_CONTAINER=nginx_proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - certs:/etc/nginx/certs
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - acme:/etc/acme.sh
+    networks:
+      - nginx_proxy
+    depends_on:
+      - nginx-proxy
 
 volumes:
   postgres_data:
     driver: local
+  certs:
+  vhost:
+  html:
+  acme:

@@ -28,6 +28,7 @@ enum state_enum = {
   SUCCESS
   ERROR
 }
+```
 
 ## Запуск с использованием Docker
 

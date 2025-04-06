@@ -10,7 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Deploy to server
+      - name: Stop server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
+            docker-compose down --remove-orphans
+
+      - name: Free images with filter "until=24h"
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker image prune -af --filter "until=24h"
+
+      - name: Update repository
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -19,10 +38,15 @@ jobs:
           script: |
             cd backend
             git pull origin main
-            
-            docker-compose down --remove-orphans
-            
-            docker image prune -af --filter "until=24h"
+
+      - name: Update certs
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
             
             sudo rm -rf ./nginx-data/certs/*
             
@@ -34,9 +58,27 @@ jobs:
             
             sudo chmod 644 ./nginx-data/certs/localhost.key
             sudo chmod 644 ./nginx-data/certs/localhost.crt
-            
+
+      - name: Up containers
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
+
             docker-compose up -d --build
             
+            docker image prune -f
+
+      - name: Free images
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
             docker image prune -f
 
   check_postgres:

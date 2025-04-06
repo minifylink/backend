@@ -79,9 +79,10 @@ services:
       - backend
     restart: always
     environment:
-      - VIRTUAL_HOST=localhost,82.202.140.205
+      - VIRTUAL_HOST=82.202.140.205,localhost
       - VIRTUAL_PORT=8082
       - HTTPS_METHOD=noredirect
+      - SSL_POLICY=Mozilla-Modern
     ports:
       - "80:80"
       - "443:443"

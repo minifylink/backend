@@ -4,7 +4,9 @@ WORKDIR /app
 
 COPY .env ./
 
-RUN apk add --no-cache git build-base curl
+RUN apt-get update && apt-get install -y curl
+
+RUN apk add --no-cache git build-base
 
 COPY go.mod go.sum ./
 RUN go mod download

@@ -81,6 +81,7 @@ services:
     environment:
       - VIRTUAL_HOST=localhost,82.202.140.205
       - VIRTUAL_PORT=8082
+      - HTTPS_METHOD=noredirect
     ports:
       - "80:80"
       - "443:443"

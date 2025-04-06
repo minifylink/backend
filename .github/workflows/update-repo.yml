@@ -54,7 +54,7 @@ jobs:
                 -newkey rsa:2048 \
                 -keyout nginx-data/certs/localhost.key \
                 -out nginx-data/certs/localhost.crt \
-                -subj "/CN=localhost" \
+                -subj "/CN=82.202.140.205" \
                 -addext "subjectAltName = DNS:localhost,IP:82.202.140.205"
             
             sudo chmod 644 ./nginx-data/certs/localhost.key

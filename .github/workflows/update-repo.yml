@@ -172,16 +172,16 @@ jobs:
               NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy 2>/dev/null || echo "not-found")
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTP_OK; then
-                if [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost/healthy)" == "200" ]; then
-                  echo "HTTP сервер доступен (статус-код 200)"
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://localhost/healthy)" == "301" ]; then
+                  echo "HTTP сервер доступен (статус-код 301 - редирект на HTTPS)"
                   HTTP_OK=true
                 else
-                  echo "HTTP-запрос не вернул статус-код 200"
+                  echo "HTTP-запрос не вернул статус-код 301"
                 fi
               fi
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTPS_OK; then
-                if [ "$(curl -s -o /dev/null -w "%{http_code}" https://localhost/healthy --insecure)" == "200" ]; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://localhost/healthy --insecure)" == "200" ]; then
                   echo "HTTPS сервер доступен (статус-код 200)"
                   HTTPS_OK=true
                 else

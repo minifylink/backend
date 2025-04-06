@@ -22,6 +22,8 @@ jobs:
             
             docker-compose down --remove-orphans
             
+            docker image prune -af --filter "until=24h"
+            
             sudo rm -rf ./nginx-data/certs/*
             
             sudo openssl req -x509 -nodes -days 365 \
@@ -34,6 +36,8 @@ jobs:
             sudo chmod 644 ./nginx-data/certs/localhost.crt
             
             docker-compose up -d --build
+            
+            docker image prune -f
 
   check_postgres:
     runs-on: ubuntu-latest

@@ -55,7 +55,7 @@ services:
       - .env
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
-      - VIRTUAL_HOST=localhost
+      - VIRTUAL_HOST=82.202.140.205,localhost
       - VIRTUAL_PORT=8082
     volumes:
       - ./config:/app/config
@@ -84,11 +84,11 @@ services:
       - minifylink
     restart: always
     environment:
-      - DEFAULT_HOST=82.202.140.205
+      - DEFAULT_HOST=localhost
+      - NETWORK_ACCESS=internal
+      - VIRTUAL_HOST_SPECIFIC_PORT=82.202.140.205:8082
       - VIRTUAL_HOST=82.202.140.205,localhost
       - VIRTUAL_PORT=8082
-      - HTTPS_METHOD=noredirect
-      - SSL_POLICY=Mozilla-Modern
     ports:
       - "80:80"
       - "443:443"

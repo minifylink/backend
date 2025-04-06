@@ -1,10 +1,10 @@
 FROM golang:1.24-alpine AS builder
 
+RUN apk --no-cache add ca-certificates tzdata curl
+
 WORKDIR /app
 
 COPY .env ./
-
-RUN apt-get update && apt-get install -y curl
 
 RUN apk add --no-cache git build-base
 

@@ -224,6 +224,6 @@ jobs:
                 exit 1
               fi
 
-              echo "Ожидание nginx... Состояние: $NGINX_HEALTH, HTTP: $HTTP_OK, HTTPS: $HTTPS_OK"
+              echo "Ожидание nginx... Состояние: $NGINX_HEALTH, HTTP: $HTTP_OK, HTTPS: $HTTPS_OK, IP_HTTP: $IP_HTTP, IP_HTTPS: $IP_HTTPS"
               sleep $INTERVAL
             done

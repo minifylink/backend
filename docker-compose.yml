@@ -59,8 +59,10 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
     networks:
-      - internal_net
-      - nginx_proxy
+      internal_net:
+      nginx_proxy:
+        aliases:
+          - minifylink
     expose:
       - "8082"
     ports:
@@ -79,6 +81,7 @@ services:
       - backend
     restart: always
     environment:
+      - DEFAULT_HOST=82.202.140.205
       - VIRTUAL_HOST=82.202.140.205,localhost
       - VIRTUAL_PORT=8082
       - HTTPS_METHOD=noredirect

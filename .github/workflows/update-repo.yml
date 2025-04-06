@@ -170,7 +170,7 @@ jobs:
             IP_HTTPS=false
 
             while true; do
-              NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy 2>/dev/null || echo "not-found")
+              NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_external 2>/dev/null || echo "not-found")
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTP_OK; then
                 if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://localhost/healthy)" == "200" ]; then
@@ -218,7 +218,7 @@ jobs:
                 echo "Текущее состояние nginx: $NGINX_HEALTH"
                 echo "HTTP доступен: $HTTP_OK"
                 echo "HTTPS доступен: $HTTPS_OK"
-                docker logs nginx_proxy || echo "Контейнер nginx_proxy не найден"
+                docker logs nginx_external || echo "Контейнер nginx_external не найден"
                 exit 1
               fi
 

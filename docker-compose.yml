@@ -81,7 +81,7 @@ services:
     image: jwilder/nginx-proxy
     container_name: nginx_proxy
     depends_on:
-      - backend
+      - minifylink
     restart: always
     environment:
       - DEFAULT_HOST=82.202.140.205

@@ -161,7 +161,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            TIMEOUT=120
+            TIMEOUT=50
             INTERVAL=10
             START_TIME=$(date +%s)
             HTTP_OK=false

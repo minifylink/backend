@@ -82,13 +82,27 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
-
-            if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
-              echo "Backend не в состоянии healthy";
-              docker logs minifylink || echo "Backend не запустился";
-              exit 1;
-            fi
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+            
+            while true; do
+              BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink 2>/dev/null || echo "not-found")
+              
+              if [[ "$BACKEND_HEALTH" == "healthy" ]]; then
+                echo "Backend в состоянии healthy"
+                break
+              fi
+              
+              if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                echo "Таймаут ожидания healthy состояния"
+                echo "Текущее состояние: $BACKEND_HEALTH"
+                docker logs minifylink || echo "Контейнер minifylink не найден"
+                exit 1
+              fi
+              echo "Ожидание состояния healthy для backend. Текущее состояние: $BACKEND_HEALTH"
+              sleep $INTERVAL
+            done
 
   check_nginx:
     runs-on: ubuntu-latest
@@ -105,28 +119,27 @@ jobs:
             TIMEOUT=120
             INTERVAL=10
             START_TIME=$(date +%s)
-
-            try_until_success() {
-              local url=$1
-              local message=$2
-              while true; do
-                curl -f "$url" && return 0
-                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
-                  echo "$message"
-                  docker logs nginx_letsencrypt || echo "nginx_letsencrypt не запустился";
-                  exit 1
+            
+            while true; do
+              NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy 2>/dev/null || echo "not-found")
+              
+              if [[ "$NGINX_HEALTH" == "healthy" ]]; then
+                echo "Nginx в состоянии healthy"
+                if curl -sf "http://localhost/healthy" > /dev/null; then
+                  echo "HTTP сервер доступен"
+                  break
+                else
+                  echo "Nginx healthy, но HTTP-запрос не прошел"
                 fi
-                echo "Попытка подключения к $url не удалась, повторяю..."
-                sleep $INTERVAL
-              done
-            }
-
-            NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
-
-            if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
-              echo "nginx_proxy не в состоянии healthy";
-              docker logs nginx_proxy || echo "nginx_proxy не запустился";
-              exit 1;
-            fi
-
-            try_until_success "http://localhost" "HTTP сервер не доступен"
+              fi
+              
+              if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                echo "Таймаут ожидания healthy состояния"
+                echo "Текущее состояние nginx: $NGINX_HEALTH"
+                docker logs nginx_proxy || echo "Контейнер nginx_proxy не найден"
+                exit 1
+              fi
+              
+              echo "Ожидание состояния healthy для nginx. Текущее состояние: $NGINX_HEALTH"
+              sleep $INTERVAL
+            done

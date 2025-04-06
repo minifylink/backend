@@ -36,7 +36,7 @@ enum state_enum = {
 
 1. Клонируйте репозиторий:
 ```bash
-git clone https://github.com/yourusername/backend.git
+git clone https://github.com/minifylink/backend.git
 cd backend
 ```
 

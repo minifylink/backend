@@ -37,7 +37,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd backend
-            git pull origin main
+            sudo git pull origin main
 
       - name: Update certs
         uses: appleboy/ssh-action@master

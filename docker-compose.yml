@@ -9,6 +9,8 @@ networks:
         - subnet: 172.28.0.0/16
   nginx_proxy:
     driver: bridge
+  app_network:
+    name: app_network
 
 services:
   postgres:
@@ -40,7 +42,7 @@ services:
     ports:
       - "5432:5432"
 
-  backend:
+  minifylink:
     build:
       context: .
       dockerfile: Dockerfile
@@ -59,6 +61,7 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
     networks:
+      app_network:
       internal_net:
       nginx_proxy:
         aliases:
@@ -97,6 +100,7 @@ services:
       - ./nginx-data/certs:/etc/nginx/certs:ro
     networks:
       - nginx_proxy
+      - app_network
     labels:
       - com.github.nginx-proxy.nginx-proxy
     healthcheck:

@@ -77,37 +77,37 @@ services:
       retries: 3
       start_period: 10s
 
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_proxy
-    depends_on:
-      - minifylink
-    restart: always
-    environment:
-      - DEFAULT_HOST=localhost
-      - NETWORK_ACCESS=internal
-      - VIRTUAL_HOST_SPECIFIC_PORT=82.202.140.205:8082
-      - VIRTUAL_HOST=82.202.140.205,localhost
-      - VIRTUAL_PORT=8082
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - vhost:/etc/nginx/vhost.d
-      - html:/usr/share/nginx/html
-      - ./nginx-data:/etc/nginx/conf.d
-      - ./nginx-data/certs:/etc/nginx/certs:ro
-    networks:
-      - nginx_proxy
-      - app_network
-    labels:
-      - com.github.nginx-proxy.nginx-proxy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost/healthy" ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+#  nginx-proxy:
+#    image: jwilder/nginx-proxy
+#    container_name: nginx_proxy
+#    depends_on:
+#      - minifylink
+#    restart: always
+#    environment:
+#      - DEFAULT_HOST=localhost
+#      - NETWORK_ACCESS=internal
+#      - VIRTUAL_HOST_SPECIFIC_PORT=82.202.140.205:8082
+#      - VIRTUAL_HOST=82.202.140.205,localhost
+#      - VIRTUAL_PORT=8082
+#    ports:
+#      - "80:80"
+#      - "443:443"
+#    volumes:
+#      - /var/run/docker.sock:/tmp/docker.sock:ro
+#      - vhost:/etc/nginx/vhost.d
+#      - html:/usr/share/nginx/html
+#      - ./nginx-data:/etc/nginx/conf.d
+#      - ./nginx-data/certs:/etc/nginx/certs:ro
+#    networks:
+#      - nginx_proxy
+#      - app_network
+#    labels:
+#      - com.github.nginx-proxy.nginx-proxy
+#    healthcheck:
+#      test: [ "CMD", "curl", "-f", "http://localhost/healthy" ]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 3
 
   nginx_external:
     image: nginx:latest

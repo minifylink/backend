@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Deploy to server
+      - name: Stop server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -18,9 +18,35 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd backend
-            git pull origin main
-            
             docker-compose down --remove-orphans
+
+      - name: Free images with filter "until=24h"
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker image prune -af --filter "until=24h"
+
+      - name: Update repository
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
+            sudo git pull origin main
+
+      - name: Update certs
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
             
             sudo rm -rf ./nginx-data/certs/*
             
@@ -28,12 +54,31 @@ jobs:
                 -newkey rsa:2048 \
                 -keyout nginx-data/certs/localhost.key \
                 -out nginx-data/certs/localhost.crt \
-                -subj "/CN=localhost"
+                -subj "/CN=82.202.140.205" \
+                -addext "subjectAltName = DNS:localhost,IP:82.202.140.205"
             
             sudo chmod 644 ./nginx-data/certs/localhost.key
             sudo chmod 644 ./nginx-data/certs/localhost.crt
-            
+
+      - name: Up containers
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd backend
+
             docker-compose up -d --build
+
+      - name: Free images
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker image prune -f
 
   check_postgres:
     runs-on: ubuntu-latest
@@ -82,51 +127,101 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink)
-
-            if [[ "$BACKEND_HEALTH" != "healthy" ]]; then
-              echo "Backend не в состоянии healthy";
-              docker logs minifylink || echo "Backend не запустился";
-              exit 1;
-            fi
+            TIMEOUT=120
+            INTERVAL=10
+            START_TIME=$(date +%s)
+            
+            while true; do
+              BACKEND_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' minifylink 2>/dev/null || echo "not-found")
+              
+              if [[ "$BACKEND_HEALTH" == "healthy" ]]; then
+                echo "Backend в состоянии healthy"
+                break
+              fi
+              
+              if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                echo "Таймаут ожидания healthy состояния"
+                echo "Текущее состояние: $BACKEND_HEALTH"
+                docker logs minifylink || echo "Контейнер minifylink не найден"
+                exit 1
+              fi
+              echo "Ожидание состояния healthy для backend. Текущее состояние: $BACKEND_HEALTH"
+              sleep $INTERVAL
+            done
 
   check_nginx:
     runs-on: ubuntu-latest
     needs: check_backend
     timeout-minutes: 10
     steps:
-      - name: Check HTTP server
+      - name: Check NGINX server (HTTP & HTTPS)
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            TIMEOUT=120
+            TIMEOUT=50
             INTERVAL=10
             START_TIME=$(date +%s)
+            HTTP_OK=false
+            HTTPS_OK=false
+            IP_HTTP=false
+            IP_HTTPS=false
 
-            try_until_success() {
-              local url=$1
-              local message=$2
-              while true; do
-                curl -f "$url" && return 0
-                if (( $(date +%s) - START_TIME >= TIMEOUT )); then
-                  echo "$message"
-                  docker logs nginx_letsencrypt || echo "nginx_letsencrypt не запустился";
-                  exit 1
+            while true; do
+              NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_external 2>/dev/null || echo "not-found")
+
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTP_OK; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://localhost/healthy)" == "200" ]; then
+                  echo "HTTP сервер доступен (статус-код 200)"
+                  HTTP_OK=true
+                else
+                  echo "HTTP-запрос не вернул статус-код 200"
                 fi
-                echo "Попытка подключения к $url не удалась, повторяю..."
-                sleep $INTERVAL
-              done
-            }
+              fi
 
-            NGINX_PROXY_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_proxy)
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTPS_OK; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://localhost/healthy --insecure)" == "200" ]; then
+                  echo "HTTPS сервер доступен (статус-код 200)"
+                  HTTPS_OK=true
+                else
+                  echo "HTTPS-запрос не вернул статус-код 200"
+                fi
+              fi
+            
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTP; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://82.202.140.205/healthy)" == "200" ]; then
+                  echo "HTTP сервер по IP доступен (статус-код 200)"
+                  IP_HTTP=true
+                else
+                  echo "HTTP-запрос по IP не вернул статус-код 200"
+                fi
+              fi
 
-            if [[ "$NGINX_PROXY_HEALTH" != "healthy" ]]; then
-              echo "nginx_proxy не в состоянии healthy";
-              docker logs nginx_proxy || echo "nginx_proxy не запустился";
-              exit 1;
-            fi
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTPS; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://82.202.140.205/healthy --insecure)" == "200" ]; then
+                  echo "HTTPS сервер по IP доступен (статус-код 200)"
+                  IP_HTTPS=true
+                else
+                  echo "HTTPS-запрос по IP не вернул статус-код 200"
+                fi
+              fi
+            
+              if $HTTP_OK && $HTTPS_OK && $IP_HTTP && $IP_HTTPS; then
+                echo "Проверка nginx успешно пройдена (HTTP и HTTPS доступны)"
+                break
+              fi
 
-            try_until_success "http://localhost" "HTTP сервер не доступен"
+              if (( $(date +%s) - START_TIME >= TIMEOUT )); then
+                echo "Таймаут ожидания"
+                echo "Текущее состояние nginx: $NGINX_HEALTH"
+                echo "HTTP доступен: $HTTP_OK"
+                echo "HTTPS доступен: $HTTPS_OK"
+                docker logs nginx_external || echo "Контейнер nginx_external не найден"
+                exit 1
+              fi
+
+              echo "Ожидание nginx... Состояние: $NGINX_HEALTH, HTTP: $HTTP_OK, HTTPS: $HTTPS_OK, IP_HTTP: $IP_HTTP, IP_HTTPS: $IP_HTTPS"
+              sleep $INTERVAL
+            done

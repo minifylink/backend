@@ -9,6 +9,8 @@ networks:
         - subnet: 172.28.0.0/16
   nginx_proxy:
     driver: bridge
+  app_network:
+    name: app_network
 
 services:
   postgres:
@@ -40,7 +42,7 @@ services:
     ports:
       - "5432:5432"
 
-  backend:
+  minifylink:
     build:
       context: .
       dockerfile: Dockerfile
@@ -53,52 +55,47 @@ services:
       - .env
     environment:
       - CONFIG_PATH=/app/config/prod.yaml
-      - VIRTUAL_HOST=localhost
+      - VIRTUAL_HOST=82.202.140.205,localhost
       - VIRTUAL_PORT=8082
     volumes:
       - ./config:/app/config
       - ./.env:/app/.env
     networks:
-      - internal_net
-      - nginx_proxy
+      app_network:
+      internal_net:
+      nginx_proxy:
+        aliases:
+          - minifylink
     expose:
       - "8082"
     ports:
       - "8082:8082"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8082/healthy" ]
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8082/healthy || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-  nginx-proxy:
-    image: jwilder/nginx-proxy
-    container_name: nginx_proxy
-    depends_on:
-      - backend
-    restart: always
-    environment:
-      - VIRTUAL_HOST=localhost,82.202.140.205
-      - VIRTUAL_PORT=8080
+  nginx_external:
+    image: nginx:latest
+    container_name: nginx_external
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - vhost:/etc/nginx/vhost.d
-      - html:/usr/share/nginx/html
-      - ./nginx-data:/etc/nginx/conf.d
-      - ./nginx-data/certs:/etc/nginx/certs:ro
+      - ./nginx-external.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx-data/certs:/etc/nginx/certs
     networks:
-      - nginx_proxy
-    labels:
-      - com.github.nginx-proxy.nginx-proxy
+      - app_network
+    depends_on:
+      - minifylink
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost" ]
+      test: [ "CMD-SHELL", "curl http://localhost/healthy || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
 volumes:
   postgres_data:

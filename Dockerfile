@@ -1,10 +1,12 @@
 FROM golang:1.24-alpine AS builder
 
+RUN apk --no-cache add ca-certificates tzdata curl
+
 WORKDIR /app
 
 COPY .env ./
 
-RUN apk add --no-cache git build-base curl
+RUN apk add --no-cache git build-base
 
 COPY go.mod go.sum ./
 RUN go mod download

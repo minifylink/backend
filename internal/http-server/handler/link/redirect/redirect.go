@@ -2,7 +2,9 @@ package redirect
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"strings"
 
 	"github.com/mssola/user_agent"
 
@@ -50,7 +52,13 @@ func New(log *slog.Logger, linkGetter LinkGetter) http.HandlerFunc {
 		}
 
 		ip := getIP(r)
-		country, _ := getCountry(ip)
+		log.Debug("Detected IP", slog.String("ip", ip))
+
+		country, err := getCountry(ip)
+		if err != nil {
+			log.Error("Failed to get country", slog.String("error", err.Error()))
+			country = "unknown"
+		}
 
 		resLink, err := linkGetter.GetLink(alias, country, device, browser)
 		if err != nil && err.Error() == "repository.GetLink: link not found" {
@@ -75,13 +83,33 @@ func New(log *slog.Logger, linkGetter LinkGetter) http.HandlerFunc {
 }
 
 func getIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+	ip := r.Header.Get("X-Real-IP")
+	if ip != "" {
 		return ip
 	}
-	return r.RemoteAddr
+
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
+		ips := strings.Split(xff, ",")
+		ip = strings.TrimSpace(ips[0])
+		if ip != "" {
+			return ip
+		}
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+
+	return ip
 }
 
 func getCountry(ip string) (string, error) {
+	if isPrivateIP(ip) {
+		return "local", nil
+	}
+
 	resp, err := http.Get("http://ip-api.com/json/" + ip)
 	if err != nil {
 		return "", err
@@ -95,4 +123,22 @@ func getCountry(ip string) (string, error) {
 		return "", err
 	}
 	return data.Country, nil
+}
+
+func isPrivateIP(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+
+	if parsedIP.IsPrivate() {
+		return true
+	}
+
+	// Проверяем локальные адреса
+	if parsedIP.IsLoopback() {
+		return true
+	}
+
+	return false
 }

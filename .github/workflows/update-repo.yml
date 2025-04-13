@@ -2,8 +2,8 @@ name: Update
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'deploy'
 
 jobs:
   update:

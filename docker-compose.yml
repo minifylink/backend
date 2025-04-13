@@ -85,6 +85,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    volumes:
+      - /etc/nginx/cert:/etc/nginx/certs
     networks:
       - app_network
     depends_on:

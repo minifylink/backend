@@ -210,7 +210,7 @@ jobs:
                 fi
               fi
             
-              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTP; then
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $URL_HTTP; then
                 if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://шайтанкод.рф/healthy)" == "200" ]; then
                   echo "HTTP сервер по IP доступен (статус-код 200)"
                   URL_HTTP=true
@@ -219,7 +219,7 @@ jobs:
                 fi
               fi
 
-              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTPS; then
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $URL_HTTPS; then
                 if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://шайтанкод.рф/healthy)" == "200" ]; then
                   echo "HTTPS сервер по IP доступен (статус-код 200)"
                   URL_HTTPS=true

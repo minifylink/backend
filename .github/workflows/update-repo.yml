@@ -168,6 +168,8 @@ jobs:
             HTTPS_OK=false
             IP_HTTP=false
             IP_HTTPS=false
+            URL_HTTP=false
+            URL_HTTPS=false
 
             while true; do
               NGINX_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' nginx_external 2>/dev/null || echo "not-found")
@@ -208,7 +210,25 @@ jobs:
                 fi
               fi
             
-              if $HTTP_OK && $HTTPS_OK && $IP_HTTP && $IP_HTTPS; then
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTP; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" http://шайтанкод.рф/healthy)" == "200" ]; then
+                  echo "HTTP сервер по IP доступен (статус-код 200)"
+                  URL_HTTP=true
+                else
+                  echo "HTTP-запрос по IP не вернул статус-код 200"
+                fi
+              fi
+
+              if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTPS; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://шайтанкод.рф/healthy --insecure)" == "200" ]; then
+                  echo "HTTPS сервер по IP доступен (статус-код 200)"
+                  URL_HTTPS=true
+                else
+                  echo "HTTPS-запрос по IP не вернул статус-код 200"
+                fi
+              fi
+            
+              if $HTTP_OK && $HTTPS_OK && $IP_HTTP && $IP_HTTPS && $URL_HTTP && $URL_HTTPS; then
                 echo "Проверка nginx успешно пройдена (HTTP и HTTPS доступны)"
                 break
               fi
@@ -218,10 +238,14 @@ jobs:
                 echo "Текущее состояние nginx: $NGINX_HEALTH"
                 echo "HTTP доступен: $HTTP_OK"
                 echo "HTTPS доступен: $HTTPS_OK"
+                echo "IP HTTP доступен: $IP_HTTP"
+                echo "IP HTTPS доступен: $IP_HTTPS"
+                echo "URL HTTP доступен: $URL_HTTP"
+                echo "URL HTTPS доступен: $URL_HTTPS"
                 docker logs nginx_external || echo "Контейнер nginx_external не найден"
                 exit 1
               fi
 
-              echo "Ожидание nginx... Состояние: $NGINX_HEALTH, HTTP: $HTTP_OK, HTTPS: $HTTPS_OK, IP_HTTP: $IP_HTTP, IP_HTTPS: $IP_HTTPS"
+              echo "Ожидание nginx... Состояние: $NGINX_HEALTH, HTTP: $HTTP_OK, HTTPS: $HTTPS_OK, IP_HTTP: $IP_HTTP, IP_HTTPS: $IP_HTTPS, URL_HTTP: $URL_HTTP, URL_HTTPS: $URL_HTTPS"
               sleep $INTERVAL
             done

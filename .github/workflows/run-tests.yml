@@ -1,67 +1,37 @@
-name: Run Go Tests
+name: Run Tests on Server
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Update"]
+    types:
+      - completed
     branches: [ main, deploy ]
-  pull_request:
-    branches: main
 
 jobs:
   test:
-    name: Run Tests
+    name: Run Remote Tests
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Docker Compose
-        run: |
-          DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
-          mkdir -p $DOCKER_CONFIG/cli-plugins
-          curl -SL https://github.com/docker/compose/releases/download/v2.24.7/docker-compose-linux-x86_64 -o $DOCKER_CONFIG/cli-plugins/docker-compose
-          chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
-          docker compose version
-
-      - name: Build minifylink container
-        run: docker compose build minifylink
-
-      - name: Start container
-        run: docker compose up -d minifylink
-
-      - name: Wait for container to start
-        run: |
-          TIMEOUT=30
-          INTERVAL=5
-          START_TIME=$(date +%s)
-          
-          while ! docker ps | grep -q minifylink; do
-            if (( $(date +%s) - START_TIME >= TIMEOUT )); then
-              echo "Контейнер не запустился за отведенное время"
-              docker ps
+      - name: Run tests on server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            echo "Запуск тестов на сервере..."
+            cd backend
+            
+            if [ "$(docker inspect --format='{{.State.Health.Status}}' minifylink 2>/dev/null)" == "healthy" ]; then
+              echo "Контейнер minifylink в состоянии healthy, запускаем тесты"
+              docker exec -t minifylink sh -c "cd /app && go test -v ./... -cover"
+            
+              docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out ./..."
+            
+              docker exec -t minifylink sh -c "cd /app && go tool cover -func=/app/coverage.out"
+            else
+              echo "Контейнер minifylink не запущен или не в состоянии healthy"
+              docker ps | grep minifylink || echo "Контейнер не найден"
               exit 1
             fi
-            echo "Ожидание запуска контейнера..."
-            sleep $INTERVAL
-          done
-          echo "Контейнер запущен"
-
-      - name: Run tests
-        run: docker exec -t minifylink sh -c "cd /app && go test -v ./... -cover"
-
-      - name: Generate coverage report
-        if: success()
-        run: |
-          mkdir -p coverage
-          docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out ./..."
-          docker cp minifylink:/app/coverage.out ./coverage/
-
-      - name: Upload coverage report
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/
-
-      - name: Print container logs on failure
-        if: failure()
-        run: docker logs minifylink

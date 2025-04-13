@@ -24,6 +24,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /app/backend .
+COPY --from=builder /app/go.mod /app/go.sum ./
 
 RUN mkdir -p /app/data
 

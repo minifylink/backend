@@ -2,9 +2,11 @@ name: Run Tests on Server
 
 on:
   workflow_run:
-    workflows: ["Update"]
+    workflows: ["update-repo"]
     types:
       - completed
+    branches: [ main, deploy ]
+  push:
     branches: [ main, deploy ]
 
 jobs:

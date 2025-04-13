@@ -34,7 +34,7 @@ func TestSaveHandler(t *testing.T) {
 			linkGetterMock := mocks.NewLinkGetter(t)
 
 			if tc.respError == "" || tc.mockError != nil {
-				linkGetterMock.On("GetLink", tc.alias, "", "desktop", "Go-http-client").
+				linkGetterMock.On("GetLink", tc.alias, "local", "desktop", "Go-http-client").
 					Return(tc.url, tc.mockError).Once()
 			}
 

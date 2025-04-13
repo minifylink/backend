@@ -25,6 +25,8 @@ WORKDIR /app
 
 COPY --from=builder /app/backend .
 COPY --from=builder /app/go.mod /app/go.sum ./
+COPY --from=builder /app/internal ./internal
+COPY --from=builder /app/cmd ./cmd
 COPY --from=builder /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:$PATH"
 

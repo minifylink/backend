@@ -5,14 +5,15 @@ import (
 	"backend/internal/http-server/handler/link/save"
 	"backend/internal/http-server/handler/link/statistic"
 	"context"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"backend/internal/config"
 	mwLogger "backend/internal/http-server/middleware/logger"
@@ -32,7 +33,7 @@ func main() {
 
 	storage, err := repository.New(cfg, log)
 	if err != nil {
-		log.Error("failed to init storage", err)
+		log.Error("failed to init storage", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
@@ -74,7 +75,7 @@ func main() {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			log.Error("failed to start server")
+			log.Error("failed to start server", slog.String("error", err.Error()))
 		}
 	}()
 
@@ -87,8 +88,7 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("failed to stop server", err)
-
+		log.Error("failed to stop server", slog.String("error", err.Error()))
 		return
 	}
 

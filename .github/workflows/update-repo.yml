@@ -184,7 +184,7 @@ jobs:
               fi
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $HTTPS_OK; then
-                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://localhost/healthy --insecure)" == "200" ]; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://localhost/healthy)" == "200" ]; then
                   echo "HTTPS сервер доступен (статус-код 200)"
                   HTTPS_OK=true
                 else
@@ -202,7 +202,7 @@ jobs:
               fi
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTPS; then
-                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://82.202.140.205/healthy --insecure)" == "200" ]; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://82.202.140.205/healthy)" == "200" ]; then
                   echo "HTTPS сервер по IP доступен (статус-код 200)"
                   IP_HTTPS=true
                 else
@@ -220,7 +220,7 @@ jobs:
               fi
 
               if [[ "$NGINX_HEALTH" == "healthy" ]] && ! $IP_HTTPS; then
-                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://шайтанкод.рф/healthy --insecure)" == "200" ]; then
+                if [ "$(curl -k -s -o /dev/null -w "%{http_code}" https://шайтанкод.рф/healthy)" == "200" ]; then
                   echo "HTTPS сервер по IP доступен (статус-код 200)"
                   URL_HTTPS=true
                 else

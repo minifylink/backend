@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Run tests on server
         uses: appleboy/ssh-action@master
         with:
@@ -27,10 +30,22 @@ jobs:
 
             if [ "$(docker inspect --format='{{.State.Health.Status}}' minifylink 2>/dev/null)" == "healthy" ]; then
               echo "Контейнер minifylink в состоянии healthy, запускаем тесты"
-              docker exec -t minifylink sh -c "cd /app && go test -v ./... -cover"
-
-              docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out ./..."
-
+              
+              # Проверяем структуру проекта в контейнере
+              echo "Проверка структуры проекта..."
+              docker exec -t minifylink sh -c "ls -la /app"
+              docker exec -t minifylink sh -c "ls -la /app/internal"
+              
+              # Запускаем тесты с указанием конкретных пакетов
+              echo "Запуск тестов..."
+              docker exec -t minifylink sh -c "cd /app && go test -v ./internal/... ./cmd/... -cover"
+              
+              # Генерируем отчет о покрытии
+              echo "Генерация отчета о покрытии..."
+              docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out ./internal/... ./cmd/..."
+              
+              # Анализируем покрытие
+              echo "Анализ покрытия кода..."
               docker exec -t minifylink sh -c "cd /app && go tool cover -func=/app/coverage.out"
             else
               echo "Контейнер minifylink не запущен или не в состоянии healthy"

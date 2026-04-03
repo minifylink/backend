@@ -1,5 +1,3 @@
-version: '3.9'
-
 networks:
   internal_net:
     driver: bridge
@@ -45,7 +43,7 @@ services:
   minifylink:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile.backend
     container_name: minifylink
     restart: always
     depends_on:

@@ -1,0 +1,37 @@
+# Исключаем Git
+.git
+.gitignore
+.github
+
+# IDE
+.idea
+.vscode
+
+# Временные и системные файлы
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Скомпилированные файлы
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Docker файлы
+docker-compose.yml
+
+# Исключаем данные, которые могут быть созданы при локальной разработке
+data/
+*.db
+
+# Исключаем логи и временные файлы
+*.log
+tmp/
+
+# Readme и другие документы
+README.md
+LICENSE
+version.txt 

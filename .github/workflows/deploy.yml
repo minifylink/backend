@@ -1,0 +1,92 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd backend
+          git pull origin main
+          mkdir -p docker
+          # Создаем необходимые файлы в директории docker
+          cat > docker/Dockerfile.postgres << 'EOF'
+          FROM postgres:17-alpine
+
+          # Копируем скрипт инициализации базы данных
+          COPY docker/init-db.sh /docker-entrypoint-initdb.d/
+
+          # Устанавливаем права на выполнение скрипта
+          RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh 
+          EOF
+          
+          cat > docker/init-db.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          # Функция для обработки ошибок
+          handle_error() {
+            echo "Ошибка при выполнении: $1"
+            exit 1
+          }
+
+          # Проверяем, что необходимые переменные окружения установлены
+          : "${POSTGRES_USER:?POSTGRES_USER is not set}"
+          : "${POSTGRES_DB:?POSTGRES_DB is not set}"
+
+          # Создаем пользователя и базу данных
+          echo "Создание базы данных $POSTGRES_DB..."
+          psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+            -- Создаем расширение для генерации UUID если оно не существует
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            
+            -- Создаем схему для нашего приложения, если она не существует
+            CREATE SCHEMA IF NOT EXISTS shortener;
+            
+            -- Устанавливаем путь поиска по умолчанию для схемы
+            SET search_path TO shortener, public;
+            
+            -- Создаем расширение для поддержки полнотекстового поиска 
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+          EOSQL
+
+          echo "База данных $POSTGRES_DB успешно настроена."
+          EOF
+          
+          cat > docker/test-db-connection.sh << 'EOF'
+          #!/bin/sh
+          set -e
+
+          # Проверка подключения к базе данных
+          echo "Проверка подключения к PostgreSQL серверу..."
+          until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c '\q'; do
+            >&2 echo "PostgreSQL недоступен - ожидание..."
+            sleep 1
+          done
+
+          # После успешного подключения
+          echo "PostgreSQL доступен - подключение успешно!"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT current_database(), current_user, version()"
+          exit 0
+          EOF
+          
+          # Устанавливаем права на выполнение скриптов
+          chmod +x docker/init-db.sh docker/test-db-connection.sh
+          
+          # Останавливаем и удаляем контейнеры перед запуском
+          docker-compose down --remove-orphans
+
+          # Удаляем все неиспользуемые тома (ОПАСНО: удаляет все неиспользуемые тома, не только связанные с этим проектом)
+          # docker volume prune -f
+
+          # Запускаем docker-compose с включённым BuildKit (для cache mount в Dockerfile)
+          DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose up -d --build

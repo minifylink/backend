@@ -1,0 +1,16 @@
+.env
+.env.*
+
+.idea
+
+.DS_Store
+**/.DS_Store
+
+# Автогенерируемые файлы nginx-proxy
+nginx-data/default.conf
+
+# Go coverage
+coverage.out
+coverage.html
+coverage*.out
+coverage*.html

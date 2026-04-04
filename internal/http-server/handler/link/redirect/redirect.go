@@ -24,7 +24,24 @@ type LinkGetter interface {
 	GetLink(alias string, country, device, browser string) (string, error)
 }
 
-func New(log *slog.Logger, linkGetter LinkGetter) http.HandlerFunc {
+// Option configures the redirect handler.
+type Option func(*handlerConfig)
+
+type handlerConfig struct {
+	countryFn func(ip string) (string, error)
+}
+
+// WithCountryGetter overrides the country-lookup function. Useful for testing.
+func WithCountryGetter(f func(ip string) (string, error)) Option {
+	return func(c *handlerConfig) { c.countryFn = f }
+}
+
+func New(log *slog.Logger, linkGetter LinkGetter, opts ...Option) http.HandlerFunc {
+	cfg := &handlerConfig{countryFn: getCountry}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		const op = "handlers.link.redirect.New"
 
@@ -54,7 +71,7 @@ func New(log *slog.Logger, linkGetter LinkGetter) http.HandlerFunc {
 		ip := getIP(r)
 		log.Debug("Detected IP", slog.String("ip", ip))
 
-		country, err := getCountry(ip)
+		country, err := cfg.countryFn(ip)
 		if err != nil {
 			log.Error("Failed to get country", slog.String("error", err.Error()))
 			country = "unknown"

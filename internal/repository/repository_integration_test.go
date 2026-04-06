@@ -1,0 +1,141 @@
+//go:build integration
+
+package repository
+
+import (
+	"backend/internal/config"
+	"backend/internal/lib/logger/slogdiscard"
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
+)
+
+var (
+	sharedStorage *Storage
+	sharedCfg     *config.Config
+)
+
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+
+	pgContainer, err := postgres.Run(ctx,
+		"postgres:17-alpine",
+		postgres.WithDatabase("testdb"),
+		postgres.WithUsername("testuser"),
+		postgres.WithPassword("testpass"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(30*time.Second),
+		),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start postgres container: %v\n", err)
+		os.Exit(1)
+	}
+
+	host, _ := pgContainer.Host(ctx)
+	port, _ := pgContainer.MappedPort(ctx, "5432")
+
+	sharedCfg = &config.Config{
+		PostgresConfig: config.PostgresConfig{
+			Host:     host,
+			Port:     port.Port(),
+			Username: "testuser",
+			Password: "testpass",
+			DBName:   "testdb",
+			SSLMode:  "disable",
+		},
+	}
+
+	log := slogdiscard.NewDiscardLogger()
+	sharedStorage, err = New(sharedCfg, log)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to init storage: %v\n", err)
+		pgContainer.Terminate(ctx)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+
+	pgContainer.Terminate(ctx)
+	os.Exit(code)
+}
+
+// cleanTables очищает все таблицы между тестами
+func cleanTables(t *testing.T) {
+	t.Helper()
+	_, err := sharedStorage.db.Exec("DELETE FROM analytics")
+	require.NoError(t, err)
+	_, err = sharedStorage.db.Exec("DELETE FROM links")
+	require.NoError(t, err)
+}
+
+// Сценарий 6: Статистика после нескольких кликов — позитивный
+func TestIntegration_Statistics_AfterMultipleClicks(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "multi")
+	require.NoError(t, err)
+
+	_, err = sharedStorage.GetLink("multi", "Russia", "desktop", "Chrome")
+	require.NoError(t, err)
+	_, err = sharedStorage.GetLink("multi", "USA", "mobile", "Safari")
+	require.NoError(t, err)
+	_, err = sharedStorage.GetLink("multi", "Germany", "desktop", "Firefox")
+	require.NoError(t, err)
+
+	stats, err := sharedStorage.GetStatistic("multi")
+	require.NoError(t, err)
+	assert.Equal(t, 3, stats.Clicks)
+	assert.Len(t, stats.Countries, 3)
+}
+
+// Сценарий 9: Процентное распределение устройств — граничный
+func TestIntegration_Statistics_DevicePercentages(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "devpct")
+	require.NoError(t, err)
+
+	for i := 0; i < 3; i++ {
+		_, err = sharedStorage.GetLink("devpct", "Russia", "desktop", "Chrome")
+		require.NoError(t, err)
+	}
+	_, err = sharedStorage.GetLink("devpct", "Russia", "mobile", "Safari")
+	require.NoError(t, err)
+
+	stats, err := sharedStorage.GetStatistic("devpct")
+	require.NoError(t, err)
+	assert.Equal(t, 4, stats.Clicks)
+	assert.Equal(t, "75%", stats.Devices["desktop"])
+	assert.Equal(t, "25%", stats.Devices["mobile"])
+}
+
+// Сценарий 10: Множественные страны — позитивный
+func TestIntegration_Statistics_MultipleCountries(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "geo")
+	require.NoError(t, err)
+
+	countries := []string{"Russia", "USA", "Germany", "France"}
+	for _, c := range countries {
+		_, err = sharedStorage.GetLink("geo", c, "desktop", "Chrome")
+		require.NoError(t, err)
+	}
+
+	stats, err := sharedStorage.GetStatistic("geo")
+	require.NoError(t, err)
+	assert.Equal(t, 4, stats.Clicks)
+	assert.Len(t, stats.Countries, 4)
+}
+

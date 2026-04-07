@@ -91,6 +91,27 @@ func TestIntegration_SaveLink_DuplicateShortID(t *testing.T) {
 	assert.Contains(t, err.Error(), "repository.SaveLink")
 }
 
+// Сценарий 3: Сохранение и получение ссылки — позитивный
+func TestIntegration_SaveAndGetLink(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "ex1")
+	require.NoError(t, err)
+
+	link, err := sharedStorage.GetLink("ex1", "Russia", "desktop", "Chrome")
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.com", link)
+}
+
+// Сценарий 4: Получение несуществующей ссылки — негативный
+func TestIntegration_GetLink_NotFound(t *testing.T) {
+	cleanTables(t)
+
+	_, err := sharedStorage.GetLink("nonexistent", "Russia", "desktop", "Chrome")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "link not found")
+}
+
 // Сценарий 5: Запись аналитики при получении ссылки — позитивный
 func TestIntegration_GetLink_RecordsAnalytics(t *testing.T) {
 	cleanTables(t)
@@ -125,6 +146,15 @@ func TestIntegration_Statistics_AfterMultipleClicks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, stats.Clicks)
 	assert.Len(t, stats.Countries, 3)
+}
+
+// Сценарий 8: Статистика несуществующей ссылки — негативный
+func TestIntegration_Statistics_NotFound(t *testing.T) {
+	cleanTables(t)
+
+	_, err := sharedStorage.GetStatistic("notexist")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "link not found")
 }
 
 // Сценарий 9: Процентное распределение устройств — граничный

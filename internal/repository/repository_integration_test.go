@@ -79,6 +79,34 @@ func cleanTables(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Сценарий 2: Дубликат short_id — негативный
+func TestIntegration_SaveLink_DuplicateShortID(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://google.com", "dup")
+	require.NoError(t, err)
+
+	err = sharedStorage.SaveLink("https://other.com", "dup")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repository.SaveLink")
+}
+
+// Сценарий 5: Запись аналитики при получении ссылки — позитивный
+func TestIntegration_GetLink_RecordsAnalytics(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "anl")
+	require.NoError(t, err)
+
+	_, err = sharedStorage.GetLink("anl", "Russia", "desktop", "Chrome")
+	require.NoError(t, err)
+
+	stats, err := sharedStorage.GetStatistic("anl")
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.Clicks)
+	assert.Contains(t, stats.Countries, "Russia")
+}
+
 // Сценарий 6: Статистика после нескольких кликов — позитивный
 func TestIntegration_Statistics_AfterMultipleClicks(t *testing.T) {
 	cleanTables(t)
@@ -139,3 +167,22 @@ func TestIntegration_Statistics_MultipleCountries(t *testing.T) {
 	assert.Len(t, stats.Countries, 4)
 }
 
+// Сценарий 12: Идемпотентность создания таблиц — позитивный
+func TestIntegration_New_IdempotentTableCreation(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://test.com", "idem")
+	require.NoError(t, err)
+
+	// Повторный вызов New — таблицы уже существуют
+	log := slogdiscard.NewDiscardLogger()
+	storage2, err := New(sharedCfg, log)
+	require.NoError(t, err)
+
+	// Данные сохранились
+	link, err := storage2.GetLink("idem", "local", "desktop", "test")
+	require.NoError(t, err)
+	assert.Equal(t, "https://test.com", link)
+
+	_ = fmt.Sprintf("storage2=%p", storage2)
+}

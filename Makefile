@@ -23,3 +23,14 @@ test-integration:
 test-e2e:
 	@echo "running e2e tests…"
 	@go test -tags=e2e -v -count=1 ./tests/e2e/...
+
+# Полный пайплайн локально: unit → integration → e2e
+# (e2e требует поднятого docker compose: make compose-up)
+test-all: test test-integration test-e2e
+	@echo "✅ all tests passed"
+
+compose-up:
+	@docker compose up -d --build postgres minifylink
+
+compose-down:
+	@docker compose down -v

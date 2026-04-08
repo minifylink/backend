@@ -79,6 +79,14 @@ func cleanTables(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Сценарий 1: Сохранение ссылки — позитивный
+func TestIntegration_SaveLink_Success(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://google.com", "ggl")
+	require.NoError(t, err)
+}
+
 // Сценарий 2: Дубликат short_id — негативный
 func TestIntegration_SaveLink_DuplicateShortID(t *testing.T) {
 	cleanTables(t)
@@ -148,6 +156,20 @@ func TestIntegration_Statistics_AfterMultipleClicks(t *testing.T) {
 	assert.Len(t, stats.Countries, 3)
 }
 
+// Сценарий 7: Статистика без кликов — граничный
+func TestIntegration_Statistics_ZeroClicks(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "zero")
+	require.NoError(t, err)
+
+	stats, err := sharedStorage.GetStatistic("zero")
+	require.NoError(t, err)
+	assert.Equal(t, 0, stats.Clicks)
+	assert.Empty(t, stats.Devices)
+	assert.Empty(t, stats.Countries)
+}
+
 // Сценарий 8: Статистика несуществующей ссылки — негативный
 func TestIntegration_Statistics_NotFound(t *testing.T) {
 	cleanTables(t)
@@ -195,6 +217,22 @@ func TestIntegration_Statistics_MultipleCountries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4, stats.Clicks)
 	assert.Len(t, stats.Countries, 4)
+}
+
+// Сценарий 11: Пустые поля аналитики — граничный
+func TestIntegration_GetLink_EmptyAnalyticsFields(t *testing.T) {
+	cleanTables(t)
+
+	err := sharedStorage.SaveLink("https://example.com", "empty")
+	require.NoError(t, err)
+
+	link, err := sharedStorage.GetLink("empty", "", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.com", link)
+
+	stats, err := sharedStorage.GetStatistic("empty")
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.Clicks)
 }
 
 // Сценарий 12: Идемпотентность создания таблиц — позитивный

@@ -36,14 +36,15 @@ jobs:
               docker exec -t minifylink sh -c "ls -la /app"
               docker exec -t minifylink sh -c "ls -la /app/internal"
               
-              # Запускаем тесты с указанием конкретных пакетов
+              # Запускаем все unit-тесты (включая cmd, исключая mocks и repository)
               echo "Запуск тестов..."
-              docker exec -t minifylink sh -c "cd /app && go test -v ./internal/... ./cmd/... -cover"
-              
-              # Генерируем отчет о покрытии
+              docker exec -t minifylink sh -c "cd /app && go test -v -cover \$(go list ./internal/... ./cmd/... | grep -Ev '/mocks|/repository')"
+
+              # Генерируем отчёт о покрытии
+              # (исключаем cmd — там только main(), исключаем repository — он покрыт integration тестами)
               echo "Генерация отчета о покрытии..."
-              docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out ./internal/... ./cmd/..."
-              
+              docker exec -t minifylink sh -c "cd /app && go test -coverprofile=/app/coverage.out \$(go list ./internal/... | grep -Ev '/mocks|/repository')"
+
               # Анализируем покрытие
               echo "Анализ покрытия кода..."
               docker exec -t minifylink sh -c "cd /app && go tool cover -func=/app/coverage.out"

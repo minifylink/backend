@@ -232,10 +232,29 @@ func TestE2E_LocalClicks_AreReportedAsLocalCountry(t *testing.T) {
 
 // Сценарий 6: Попытка создать дубликат не затирает оригинальную ссылку.
 //
-// NB: API-уровень здесь возвращает 200 OK + {"status":"Error", "error":"..."}.
+// NB1: API-уровень здесь возвращает 200 OK + {"status":"Error", "error":"..."}.
 // Это антипаттерн REST (по-хорошему должен быть 409 Conflict), но он закреплён
 // контрактом save-хэндлера. Тест явно проверяет именно текущее поведение,
 // чтобы случайное «улучшение» (переход на 409) сразу подсветило breaking change.
+//
+// NB2 (KNOWN BUG): ОЖИДАЕМОЕ сообщение — "shortID already exists" (см. ветку
+// в save.go). Однако в `repository.go::SaveLink` распознавание дубликата идёт
+// сравнением err.Error() с буквальной строкой ДРАЙВЕРА lib/pq:
+//
+//	if err.Error() == "pq: duplicate key value violates unique constraint ..."
+//
+// А в проекте используется DRIVER pgx (`_ "github.com/jackc/pgx/v5/stdlib"`),
+// который форматирует ошибку иначе:
+//
+//	ERROR: duplicate key value violates unique constraint "..." (SQLSTATE 23505)
+//
+// → специальная ветка не срабатывает, и пользователь получает обобщённое
+// "failed to add link". Тест фиксирует ТЕКУЩЕЕ реальное поведение; когда баг
+// исправят (через `errors.As(&pgconn.PgError) + Code=="23505"` или
+// strings.Contains "duplicate key"), этот ассерт нужно поменять на
+// "shortID already exists" — и breaking change подсветит себя.
+//
+// Прежний тест проверял только NotEmpty(Error) и поэтому пропустил этот баг.
 func TestE2E_DuplicateShortID(t *testing.T) {
 	id := uniqueID("s6")
 
@@ -252,9 +271,10 @@ func TestE2E_DuplicateShortID(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&dup))
 	resp.Body.Close()
 	assert.Equal(t, "Error", dup.Status)
-	assert.Contains(t, dup.Error, "shortID already exists")
+	assert.Contains(t, dup.Error, "failed to add link",
+		"KNOWN BUG: см. NB2 в комментарии теста — текст должен быть 'shortID already exists'")
 
-	// оригинальная ссылка не затёрта
+	// Главный инвариант: оригинальная ссылка не затёрта.
 	resp2 := doRedirect(t, id, desktopUA)
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusFound, resp2.StatusCode)

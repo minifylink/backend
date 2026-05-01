@@ -9,29 +9,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Existing test
+// TestIsPrivateIP — единый табличный тест, в котором каждый case явно помечен
+// своим классом эквивалентности. Прежний разнос на четыре функции
+// (TestIsPrivateIP / _InvalidIP / _IPv6Loopback / _PublicIP) дублировал
+// представителей класса EQ_invalid (в TestIsPrivateIP было "not-an-ip",
+// в _InvalidIP — ещё три), что нарушало принцип «один тест — один класс».
 func TestIsPrivateIP(t *testing.T) {
-	assert.False(t, isPrivateIP("not-an-ip"))  // parsedIP == nil
-	assert.True(t, isPrivateIP("192.168.1.1")) // IsPrivate()
-	assert.True(t, isPrivateIP("127.0.0.1"))   // IsLoopback()
-	assert.False(t, isPrivateIP("8.8.8.8"))    // публичный IP → return false
-}
-
-// New tests for isPrivateIP
-
-func TestIsPrivateIP_InvalidIP(t *testing.T) {
-	assert.False(t, isPrivateIP("garbage"))
-	assert.False(t, isPrivateIP(""))
-	assert.False(t, isPrivateIP("999.999.999.999"))
-}
-
-func TestIsPrivateIP_IPv6Loopback(t *testing.T) {
-	assert.True(t, isPrivateIP("::1"))
-}
-
-func TestIsPrivateIP_PublicIP(t *testing.T) {
-	assert.False(t, isPrivateIP("8.8.8.8"))
-	assert.False(t, isPrivateIP("1.1.1.1"))
+	cases := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		// EQ_invalid: парсер net.ParseIP вернёт nil → функция возвращает false
+		{"invalid_garbage", "garbage", false},
+		{"invalid_empty", "", false},
+		{"invalid_octets_overflow", "999.999.999.999", false},
+		// EQ_private_v4: попадает под net.IP.IsPrivate()
+		{"private_v4_192_168", "192.168.1.1", true},
+		// EQ_loopback_v4: попадает под net.IP.IsLoopback()
+		{"loopback_v4_127", "127.0.0.1", true},
+		// EQ_loopback_v6: граничный случай — IPv6 loopback
+		{"loopback_v6", "::1", true},
+		// EQ_public: ни IsPrivate, ни IsLoopback — возвращаем false
+		{"public_google_dns", "8.8.8.8", false},
+		{"public_cloudflare_dns", "1.1.1.1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isPrivateIP(tc.ip))
+		})
+	}
 }
 
 // Tests for getIP

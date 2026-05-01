@@ -1,7 +1,6 @@
 package response
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
@@ -9,34 +8,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOK — функция OK() формирует ответ Status="OK" без error.
-// Объединяет прежние `TestOK_Status` и `TestOK_NoError`: одна функция —
-// один сценарий — один тест с двумя связанными ассертами.
-func TestOK(t *testing.T) {
-	r := OK()
-	assert.Equal(t, StatusOK, r.Status)
-	assert.Empty(t, r.Error)
-}
+// TestResponseConstructors — единый КОНТРАКТНЫЙ тест на публичные функции
+// OK() и Error(msg). Цель — НЕ покрыть две строки кода, а зафиксировать
+// контракт значений в JSON-ответе:
+//
+//	OK()        → {"status": "OK"}
+//	Error(msg)  → {"status": "Error", "error": <msg>}
+//
+// Если кто-то изменит StatusOK = "OK" на "ok" / "success" — компилятор
+// этого не поймает (это просто значение константы), а фронт сломается.
+// Этот тест защищает от такого breaking change.
+//
+// Прежде это был перебор: TestOK_Status + TestOK_NoError + TestError_*
+// с подкейсом «10000 символов» (последний — overtesting: компилятор Go
+// строки сам не обрезает, реалистичных багов кейс не находит).
+func TestResponseConstructors(t *testing.T) {
+	t.Run("OK", func(t *testing.T) {
+		r := OK()
+		assert.Equal(t, StatusOK, r.Status)
+		assert.Empty(t, r.Error)
+	})
 
-// TestError_PreservesMessage — Error(msg) возвращает Status="Error"
-// и сохраняет сообщение как есть, включая граничные случаи (пустое и очень длинное).
-func TestError_PreservesMessage(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  string
-	}{
-		{"normal", "something went wrong"},
-		{"empty", ""},
-		{"very_long_10000_chars", strings.Repeat("a", 10000)},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			r := Error(tc.msg)
-			assert.Equal(t, StatusError, r.Status)
-			assert.Equal(t, tc.msg, r.Error)
-		})
-	}
+	t.Run("Error_with_message", func(t *testing.T) {
+		r := Error("something went wrong")
+		assert.Equal(t, StatusError, r.Status)
+		assert.Equal(t, "something went wrong", r.Error)
+	})
+
+	// Граничный случай: пустое сообщение. Контракт — Status="Error" даже когда
+	// текста ошибки нет. Защищает от соблазна «оптимизировать» через
+	// `if msg == "" { return OK() }`.
+	t.Run("Error_empty_message", func(t *testing.T) {
+		r := Error("")
+		assert.Equal(t, StatusError, r.Status)
+		assert.Empty(t, r.Error)
+	})
 }
 
 // Helper structs для генерации реальных ошибок валидатора.

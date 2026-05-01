@@ -10,115 +10,96 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// newMW — собирает middleware с тихим логгером.
+func newMW(next http.Handler) http.Handler {
+	return New(slogdiscard.NewDiscardLogger())(next)
+}
+
+// TestLoggerMiddleware_CallsNext — middleware обязан передавать управление дальше.
 func TestLoggerMiddleware_CallsNext(t *testing.T) {
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := newMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-	})
+	}))
 
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
+	mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.True(t, called)
+	assert.True(t, called, "middleware должен вызвать next.ServeHTTP")
 }
 
-func TestLoggerMiddleware_PreservesBody(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello"))
-	})
+// TestLoggerMiddleware_PreservesResponse — middleware не модифицирует ответ:
+//   - тело передаётся как есть,
+//   - status code сохраняется (для явного WriteHeader),
+//   - default 200 без явного WriteHeader.
+//
+// Заменяет три отдельных теста (`_PreservesBody`, `_PreservesStatusCode`,
+// `_DefaultStatusCode`) одним набором, у которого общая суть — «ничего не ломаем».
+func TestLoggerMiddleware_PreservesResponse(t *testing.T) {
+	cases := []struct {
+		name       string
+		writer     func(w http.ResponseWriter)
+		wantBody   string
+		wantStatus int
+	}{
+		{
+			name:       "preserves_body",
+			writer:     func(w http.ResponseWriter) { _, _ = w.Write([]byte("hello")) },
+			wantBody:   "hello",
+			wantStatus: http.StatusOK, // implicit 200 при первом Write
+		},
+		{
+			name:       "preserves_explicit_201",
+			writer:     func(w http.ResponseWriter) { w.WriteHeader(http.StatusCreated) },
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "preserves_500",
+			writer:     func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) },
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "default_200_without_writeheader",
+			writer:     func(w http.ResponseWriter) { _, _ = w.Write([]byte("ok")) },
+			wantBody:   "ok",
+			wantStatus: http.StatusOK,
+		},
+	}
 
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mw := newMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tc.writer(w)
+			}))
+			rr := httptest.NewRecorder()
+			mw.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/test", nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, "hello", rr.Body.String())
+			assert.Equal(t, tc.wantStatus, rr.Code)
+			if tc.wantBody != "" {
+				assert.Equal(t, tc.wantBody, rr.Body.String())
+			}
+		})
+	}
 }
 
-func TestLoggerMiddleware_PreservesStatusCode(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-	})
-
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusCreated, rr.Code)
-}
-
-func TestLoggerMiddleware_DefaultStatusCode(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
-
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestLoggerMiddleware_GET(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestLoggerMiddleware_POST(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
-
-	req := httptest.NewRequest(http.MethodPost, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestLoggerMiddleware_ErrorStatus500(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	})
-
-	log := slogdiscard.NewDiscardLogger()
-	handler := New(log)(next)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+// TestLoggerMiddleware_HTTPMethodAgnostic — middleware должен корректно работать
+// со ВСЕМИ HTTP-методами, не только GET и POST. Прежние тесты `_GET` / `_POST`
+// проверяли одну и ту же логику дважды, не покрывая остальных методов.
+func TestLoggerMiddleware_HTTPMethodAgnostic(t *testing.T) {
+	methods := []string{
+		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete,
+		http.MethodPatch, http.MethodHead, http.MethodOptions,
+	}
+	for _, m := range methods {
+		m := m
+		t.Run(m, func(t *testing.T) {
+			mw := newMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			rr := httptest.NewRecorder()
+			mw.ServeHTTP(rr, httptest.NewRequest(m, "/test", nil))
+			assert.Equal(t, http.StatusOK, rr.Code,
+				"middleware должен быть метод-агностичным")
+		})
+	}
 }

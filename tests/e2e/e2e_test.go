@@ -203,8 +203,18 @@ func TestE2E_MixedDevices(t *testing.T) {
 	assert.Equal(t, "50%", stats.Devices["mobile"])
 }
 
-// Сценарий 5: Статистика из разных стран (при локальном запуске — "local")
-func TestE2E_DifferentCountries(t *testing.T) {
+// Сценарий 5: Локальные клики попадают в countries как "local".
+//
+// История теста: прежняя версия называлась TestE2E_DifferentCountries и претендовала
+// на проверку «разных стран», но при локальном запуске ВСЕ клики идут с loopback IP,
+// которые getCountry() мапит в фиксированную строку "local". То есть «разных стран»
+// в этом окружении нет в принципе.
+//
+// Теперь тест честно проверяет то, что реально проверяется:
+// 3 локальных клика → countries == ["local"], len == 1.
+// Покрытие действительно «разных стран» сделано через юнит/интеграцию,
+// где можно подменить countryFn без обращения к ip-api.com.
+func TestE2E_LocalClicks_AreReportedAsLocalCountry(t *testing.T) {
 	id := uniqueID("s5")
 	result := createLink(t, "https://example.com", id)
 	require.Equal(t, "OK", result.Status)
@@ -216,24 +226,39 @@ func TestE2E_DifferentCountries(t *testing.T) {
 
 	stats := getStats(t, id)
 	assert.Equal(t, 3, stats.Clicks)
-	assert.NotEmpty(t, stats.Countries)
+	assert.Equal(t, []string{"local"}, stats.Countries,
+		"в локальном e2e окружении все IP — приватные, geo-сервис не вызывается")
 }
 
-// Сценарий 6: Попытка создать дубликат и успешный переход по оригиналу
+// Сценарий 6: Попытка создать дубликат не затирает оригинальную ссылку.
+//
+// NB: API-уровень здесь возвращает 200 OK + {"status":"Error", "error":"..."}.
+// Это антипаттерн REST (по-хорошему должен быть 409 Conflict), но он закреплён
+// контрактом save-хэндлера. Тест явно проверяет именно текущее поведение,
+// чтобы случайное «улучшение» (переход на 409) сразу подсветило breaking change.
 func TestE2E_DuplicateShortID(t *testing.T) {
 	id := uniqueID("s6")
 
 	result := createLink(t, "https://a.com", id)
 	require.Equal(t, "OK", result.Status)
 
-	result2 := createLink(t, "https://b.com", id)
-	assert.Equal(t, "Error", result2.Status)
-	assert.NotEmpty(t, result2.Error)
+	// дубликат: HTTP 200, но в теле — Error
+	body, _ := json.Marshal(saveRequest{Link: "https://b.com", ShortID: id})
+	resp, err := client.Post(baseURL+"/api/v1/shorten/", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode,
+		"API закрепляет 200+Error вместо 409 Conflict")
+	var dup saveResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&dup))
+	resp.Body.Close()
+	assert.Equal(t, "Error", dup.Status)
+	assert.Contains(t, dup.Error, "shortID already exists")
 
-	resp := doRedirect(t, id, desktopUA)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusFound, resp.StatusCode)
-	assert.Equal(t, "https://a.com", resp.Header.Get("Location"))
+	// оригинальная ссылка не затёрта
+	resp2 := doRedirect(t, id, desktopUA)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusFound, resp2.StatusCode)
+	assert.Equal(t, "https://a.com", resp2.Header.Get("Location"))
 }
 
 // Сценарий 7: Переход по несуществующей ссылке, затем создание и переход
@@ -298,44 +323,57 @@ func TestE2E_AccumulatingStats(t *testing.T) {
 	assert.Equal(t, 5, stats.Clicks)
 }
 
-// Сценарий 10: Создание ссылки с невалидными данными, затем с валидными
-func TestE2E_InvalidThenValidData(t *testing.T) {
-	id := uniqueID("s10")
-
-	// Невалидный URL
+// Сценарий 10a/10b/10c: валидация данных при создании ссылки.
+//
+// Прежде это был ОДИН тест с тремя последовательными шагами; падение шага №2
+// маскировало результаты шага №3. Здесь — три независимых теста, каждый
+// проверяет один класс эквивалентности.
+func TestE2E_CreateLink_InvalidURL(t *testing.T) {
+	id := uniqueID("s10a")
 	result := createLink(t, "not-a-url", id)
 	assert.Equal(t, "Error", result.Status)
+	assert.NotEmpty(t, result.Error,
+		"для невалидного URL должно быть конкретное сообщение")
+}
 
-	// Пустой URL
-	result = createLink(t, "", id)
+func TestE2E_CreateLink_EmptyURL(t *testing.T) {
+	id := uniqueID("s10b")
+	result := createLink(t, "", id)
 	assert.Equal(t, "Error", result.Status)
+	assert.NotEmpty(t, result.Error)
+}
 
-	// Валидный запрос
-	result = createLink(t, "https://google.com", id)
+func TestE2E_CreateLink_ValidURL_AndRedirect(t *testing.T) {
+	id := uniqueID("s10c")
+	result := createLink(t, "https://google.com", id)
 	require.Equal(t, "OK", result.Status)
 
 	resp := doRedirect(t, id, desktopUA)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.Equal(t, "https://google.com", resp.Header.Get("Location"))
 }
 
-// Сценарий 11: Переход с разных браузеров и проверка статистики
-func TestE2E_DifferentBrowsers(t *testing.T) {
+// Сценарий 11: разные desktop-браузеры одинаково классифицируются как desktop.
+//
+// Прежнее имя `TestE2E_DifferentBrowsers` вводило в заблуждение: тест
+// проверял НЕ "разные браузеры в статистике" (поле devices хранит только
+// desktop/mobile, без browser), а то, что три desktop-UA дают devices.desktop=100%.
+// Новое имя честно отражает суть.
+func TestE2E_DesktopBrowsers_AllClassifiedAsDesktop(t *testing.T) {
 	id := uniqueID("s11")
 	createLink(t, "https://example.com", id)
 
-	resp := doRedirect(t, id, desktopUA)
-	resp.Body.Close()
-
-	resp = doRedirect(t, id, firefoxUA)
-	resp.Body.Close()
-
-	resp = doRedirect(t, id, safariUA)
-	resp.Body.Close()
+	for _, ua := range []string{desktopUA, firefoxUA, safariUA} {
+		resp := doRedirect(t, id, ua)
+		resp.Body.Close()
+	}
 
 	stats := getStats(t, id)
 	assert.Equal(t, 3, stats.Clicks)
-	assert.Equal(t, "100%", stats.Devices["desktop"])
+	assert.Equal(t, "100%", stats.Devices["desktop"],
+		"3 разных desktop-UA → 100% desktop, 0% mobile")
+	assert.NotContains(t, stats.Devices, "mobile")
 }
 
 // Сценарий 12: Статистика несуществующей ссылки, затем её создание и клик

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -17,14 +18,34 @@ import (
 	"backend/internal/repository"
 )
 
-func TestStatisticHandler(t *testing.T) {
+// newRouter — общий setup для unit-тестов хэндлера статистики.
+func newRouter(t *testing.T) (*chi.Mux, *mocks.StatisticGetter) {
+	t.Helper()
+	mock := mocks.NewStatisticGetter(t)
+	r := chi.NewRouter()
+	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
+	return r, mock
+}
+
+func doGet(t *testing.T, r http.Handler, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestStatisticHandler_TableDriven — основной table-driven с покрытием
+// классов эквивалентности (валидный/невалидный short_id),
+// ошибочных путей (not found / internal error) и базового success.
+func TestStatisticHandler_TableDriven(t *testing.T) {
 	cases := []struct {
 		name         string
 		shortID      string
 		mockResponse *repository.StatisticResponse
 		mockError    error
-		expectedCode int
-		expectedBody string
+		wantStatus   string // "OK" — для success возвращает stats; "Error" — error response
+		wantErr      string
 	}{
 		{
 			name:    "Success",
@@ -34,283 +55,147 @@ func TestStatisticHandler(t *testing.T) {
 				Devices:   map[string]string{"desktop": "80%", "mobile": "20%"},
 				Countries: []string{"Russia", "USA"},
 			},
-			expectedCode: http.StatusOK,
 		},
 		{
-			name:         "Not Found",
-			shortID:      "not_exists",
-			mockError:    errors.New("repository.GetStatistic: link not found"),
-			expectedCode: http.StatusOK,
-			expectedBody: `{"status":"Error","error":"not found"}`,
+			name:       "Not Found",
+			shortID:    "not_exists",
+			mockError:  errors.New("repository.GetStatistic: link not found"),
+			wantStatus: "Error",
+			wantErr:    "not found",
+		},
+		{
+			name:       "Internal Error masked as not found",
+			shortID:    "internal_err",
+			mockError:  errors.New("database connection lost"),
+			wantStatus: "Error",
+			wantErr:    "not found", // хэндлер маскирует все ошибки под "not found"; см. statistic.go
 		},
 	}
 
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			statisticGetterMock := mocks.NewStatisticGetter(t)
-
+			r, mock := newRouter(t)
 			if tc.mockError != nil {
-				statisticGetterMock.On("GetStatistic", tc.shortID).
-					Return(nil, tc.mockError).Once()
+				mock.On("GetStatistic", tc.shortID).Return(nil, tc.mockError).Once()
 			} else {
-				statisticGetterMock.On("GetStatistic", tc.shortID).
-					Return(tc.mockResponse, nil).Once()
+				mock.On("GetStatistic", tc.shortID).Return(tc.mockResponse, nil).Once()
 			}
 
-			r := chi.NewRouter()
-			r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), statisticGetterMock))
+			rr := doGet(t, r, "/"+tc.shortID)
+			require.Equal(t, http.StatusOK, rr.Code)
 
-			req, err := http.NewRequest(http.MethodGet, "/"+tc.shortID, nil)
-			require.NoError(t, err)
-
-			rr := httptest.NewRecorder()
-			r.ServeHTTP(rr, req)
-
-			assert.Equal(t, tc.expectedCode, rr.Code)
-
-			if tc.expectedBody != "" {
-				assert.JSONEq(t, tc.expectedBody, rr.Body.String())
-			} else if tc.mockResponse != nil {
-				var response repository.StatisticResponse
-				err = json.Unmarshal(rr.Body.Bytes(), &response)
-				require.NoError(t, err)
-
-				assert.Equal(t, tc.mockResponse.Clicks, response.Clicks)
-				assert.Equal(t, tc.mockResponse.Devices, response.Devices)
-				assert.Equal(t, tc.mockResponse.Countries, response.Countries)
+			if tc.wantErr != "" {
+				var body map[string]interface{}
+				require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+				assert.Equal(t, tc.wantStatus, body["status"])
+				assert.Equal(t, tc.wantErr, body["error"])
+			} else {
+				var got repository.StatisticResponse
+				require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+				assert.Equal(t, tc.mockResponse.Clicks, got.Clicks)
+				assert.Equal(t, tc.mockResponse.Devices, got.Devices)
+				assert.Equal(t, tc.mockResponse.Countries, got.Countries)
 			}
 		})
 	}
 }
 
-func TestStatisticHandlerEmptyShortID(t *testing.T) {
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), nil))
+// TestStatisticHandler_EmptyShortID — два пути с одной целью:
+//  1. через chi-роутер: пустой short_id не матчится → 404 от роутера;
+//  2. при прямом вызове хэндлера (без chi): хэндлер сам отвечает "invalid request".
+//
+// Прежде это были два разных теста; объединение в один с двумя подкейсами
+// показывает, что речь об одном поведении в разных контекстах вызова.
+func TestStatisticHandler_EmptyShortID(t *testing.T) {
+	t.Run("via_router_returns_404", func(t *testing.T) {
+		r, _ := newRouter(t)
+		rr := doGet(t, r, "/")
+		assert.Equal(t, http.StatusNotFound, rr.Code,
+			"chi не находит route без параметра")
+	})
 
-	req, err := http.NewRequest(http.MethodGet, "/", nil)
-	require.NoError(t, err)
+	t.Run("direct_call_returns_invalid_request", func(t *testing.T) {
+		handler := statistic.New(slogdiscard.NewDiscardLogger(), nil)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
 
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.JSONEq(t, `{"status":"Error","error":"invalid request"}`, rr.Body.String())
+	})
 }
 
-func TestStatisticHandlerEmptyShortIDDirect(t *testing.T) {
-	handler := statistic.New(slogdiscard.NewDiscardLogger(), nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.JSONEq(t, `{"status":"Error","error":"invalid request"}`, rr.Body.String())
-}
-
-// New tests
-
-func TestStatisticHandler_ReturnsClicks(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "abc").Return(&repository.StatisticResponse{
+// TestStatisticHandler_ResponseFields — поля `clicks`, `devices`, `countries`
+// корректно сериализуются в JSON. Объединяет прежние три теста
+// (`_ReturnsClicks`, `_ReturnsDevices`, `_ReturnsCountries`) в один путь данных
+// с проверкой всех полей одновременно.
+func TestStatisticHandler_ResponseFields(t *testing.T) {
+	mockResp := &repository.StatisticResponse{
 		Clicks:    42,
-		Devices:   map[string]string{},
-		Countries: []string{},
-	}, nil).Once()
+		Devices:   map[string]string{"desktop": "60%", "mobile": "40%"},
+		Countries: []string{"US", "RU", "DE"},
+	}
 
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
+	r, mock := newRouter(t)
+	mock.On("GetStatistic", "abc").Return(mockResp, nil).Once()
 
-	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	rr := doGet(t, r, "/abc")
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "application/json")
 
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, 42, resp.Clicks)
+	var got repository.StatisticResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, mockResp.Clicks, got.Clicks)
+	assert.Equal(t, mockResp.Devices, got.Devices)
+	assert.Equal(t, mockResp.Countries, got.Countries)
 }
 
-func TestStatisticHandler_ReturnsDevices(t *testing.T) {
-	devices := map[string]string{"desktop": "60%", "mobile": "40%"}
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "abc").Return(&repository.StatisticResponse{
-		Clicks:    5,
-		Devices:   devices,
-		Countries: []string{},
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, devices, resp.Devices)
-}
-
-func TestStatisticHandler_ReturnsCountries(t *testing.T) {
-	countries := []string{"US", "RU", "DE"}
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "abc").Return(&repository.StatisticResponse{
-		Clicks:    3,
-		Devices:   map[string]string{},
-		Countries: countries,
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, countries, resp.Countries)
-}
-
+// TestStatisticHandler_ZeroClicks — граничный случай: ссылка без переходов.
+// Ожидаем clicks=0, пустые devices и countries (а не null/missing).
 func TestStatisticHandler_ZeroClicks(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
+	r, mock := newRouter(t)
 	mock.On("GetStatistic", "empty").Return(&repository.StatisticResponse{
 		Clicks:    0,
 		Devices:   map[string]string{},
 		Countries: []string{},
 	}, nil).Once()
 
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
+	rr := doGet(t, r, "/empty")
+	require.Equal(t, http.StatusOK, rr.Code)
 
-	req := httptest.NewRequest(http.MethodGet, "/empty", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, 0, resp.Clicks)
-	assert.Empty(t, resp.Devices)
+	var got repository.StatisticResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, 0, got.Clicks)
+	assert.Empty(t, got.Devices)
+	assert.Empty(t, got.Countries)
 }
 
-func TestStatisticHandler_MultipleDevices(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "multi").Return(&repository.StatisticResponse{
-		Clicks:    4,
-		Devices:   map[string]string{"desktop": "75%", "mobile": "25%"},
-		Countries: []string{},
-	}, nil).Once()
+// TestStatisticHandler_ShortIDFormats — short_id с разной структурой,
+// все валидны с точки зрения хэндлера (он формат не валидирует, просто пробрасывает).
+// Объединяет прежние `_VeryLongShortID` и `_SpecialCharsInShortID`.
+//
+// Заметь: длина 100 здесь возможна именно потому, что хэндлер длину не валидирует.
+// На уровне БД (VARCHAR(20)) это упало бы — см. integration-тест.
+func TestStatisticHandler_ShortIDFormats(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"long_120_chars", strings.Repeat("a", 120)},
+		{"with_dash_and_underscore", "test-id_123"},
+	}
 
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			r, mock := newRouter(t)
+			mock.On("GetStatistic", tc.id).Return(&repository.StatisticResponse{
+				Clicks: 1, Devices: map[string]string{}, Countries: []string{},
+			}, nil).Once()
 
-	req := httptest.NewRequest(http.MethodGet, "/multi", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, "75%", resp.Devices["desktop"])
-	assert.Equal(t, "25%", resp.Devices["mobile"])
-}
-
-func TestStatisticHandler_MultipleCountries(t *testing.T) {
-	countries := []string{"US", "RU", "DE"}
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "geo").Return(&repository.StatisticResponse{
-		Clicks:    10,
-		Devices:   map[string]string{},
-		Countries: countries,
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/geo", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var resp repository.StatisticResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Len(t, resp.Countries, 3)
-}
-
-func TestStatisticHandler_InternalError(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "err").Return(nil, errors.New("database connection lost")).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/err", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	var respBody map[string]interface{}
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &respBody))
-	assert.Equal(t, "not found", respBody["error"])
-}
-
-func TestStatisticHandler_VeryLongShortID(t *testing.T) {
-	longID := "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01234567890123456789"
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", longID).Return(&repository.StatisticResponse{
-		Clicks: 0, Devices: map[string]string{}, Countries: []string{},
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/"+longID, nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestStatisticHandler_SpecialCharsInShortID(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "test-id_123").Return(&repository.StatisticResponse{
-		Clicks: 1, Devices: map[string]string{}, Countries: []string{},
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/test-id_123", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestStatisticHandler_ResponseContentType(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "ct").Return(&repository.StatisticResponse{
-		Clicks: 0, Devices: map[string]string{}, Countries: []string{},
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/ct", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	assert.Contains(t, rr.Header().Get("Content-Type"), "application/json")
-}
-
-func TestStatisticHandler_StatusCode200(t *testing.T) {
-	mock := mocks.NewStatisticGetter(t)
-	mock.On("GetStatistic", "ok").Return(&repository.StatisticResponse{
-		Clicks: 5, Devices: map[string]string{}, Countries: []string{},
-	}, nil).Once()
-
-	r := chi.NewRouter()
-	r.Get("/{short_id}", statistic.New(slogdiscard.NewDiscardLogger(), mock))
-
-	req := httptest.NewRequest(http.MethodGet, "/ok", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
+			rr := doGet(t, r, "/"+tc.id)
+			assert.Equal(t, http.StatusOK, rr.Code)
+		})
+	}
 }

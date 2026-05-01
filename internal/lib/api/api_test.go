@@ -4,105 +4,98 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetRedirect_Success_302(t *testing.T) {
+// fakeRedirectServer — поднимает тестовый сервер, отвечающий заданным статусом
+// и (опционально) Location-заголовком.
+func fakeRedirectServer(t *testing.T, status int, location string) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", "https://example.com")
-		w.WriteHeader(http.StatusFound)
+		if location != "" {
+			w.Header().Set("Location", location)
+		}
+		w.WriteHeader(status)
 	}))
-	defer srv.Close()
-
-	location, err := GetRedirect(srv.URL)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.com", location)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
-func TestGetRedirect_ReturnsLocationHeader(t *testing.T) {
-	target := "https://google.com/search?q=test"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", target)
-		w.WriteHeader(http.StatusFound)
-	}))
-	defer srv.Close()
+// TestGetRedirect_ReturnsLocation — позитивный путь: 302 + Location → возвращаем URL.
+// Объединяет прежние `_Success_302` и `_ReturnsLocationHeader` (одна логика).
+func TestGetRedirect_ReturnsLocation(t *testing.T) {
+	const target = "https://google.com/search?q=test"
+	srv := fakeRedirectServer(t, http.StatusFound, target)
 
 	location, err := GetRedirect(srv.URL)
 	require.NoError(t, err)
 	assert.Equal(t, target, location)
 }
 
-func TestGetRedirect_NoRedirect_200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+// TestGetRedirect_NonRedirectStatuses — табличный тест по классам эквивалентности
+// "не-редиректных" статусов: 200, 404, 500. Все должны приводить к ErrInvalidStatusCode
+// и сообщение должно содержать сам код.
+func TestGetRedirect_NonRedirectStatuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+	}{
+		{"200_OK", http.StatusOK},
+		{"404_NotFound", http.StatusNotFound},
+		{"500_InternalServerError", http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			srv := fakeRedirectServer(t, tc.status, "")
 
-	_, err := GetRedirect(srv.URL)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrInvalidStatusCode))
+			_, err := GetRedirect(srv.URL)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrInvalidStatusCode))
+			// статус-код должен попадать в сообщение об ошибке —
+			// без этого диагностика реальных багов в проде сильно затруднится.
+			assert.Contains(t, err.Error(), strconv.Itoa(tc.status))
+		})
+	}
 }
 
-func TestGetRedirect_ServerError_500(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	_, err := GetRedirect(srv.URL)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrInvalidStatusCode))
-}
-
-func TestGetRedirect_NotFound_404(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	_, err := GetRedirect(srv.URL)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrInvalidStatusCode))
-}
-
+// TestGetRedirect_InvalidURL — невалидный URL → сетевая/парс-ошибка от http.Client.
 func TestGetRedirect_InvalidURL(t *testing.T) {
 	_, err := GetRedirect("://invalid-url")
 	require.Error(t, err)
 }
 
+// TestGetRedirect_EmptyLocation — 302 без заголовка Location → возвращаем "" без ошибки.
+// Граничный случай: технически редирект корректен, но клиенту некуда идти.
 func TestGetRedirect_EmptyLocation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusFound)
-	}))
-	defer srv.Close()
+	srv := fakeRedirectServer(t, http.StatusFound, "")
 
 	location, err := GetRedirect(srv.URL)
 	require.NoError(t, err)
 	assert.Empty(t, location)
 }
 
-func TestGetRedirect_ErrorContainsStatusCode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+// TestGetRedirect_StopsAfterFirstRedirect — НАСТОЯЩАЯ цепочка из двух серверов.
+// Прежний тест с тем же именем поднимал ОДИН сервер и не проверял
+// поведение клиента при нескольких хопах — был зелёный, но ничего не доказывал.
+//
+// Здесь:
+//   - srv2 — финальная страница, возвращает 200 (для GetRedirect это ошибка, ОК).
+//   - srv1 — первый редирект 302 → srv2.URL.
+//
+// GetRedirect должен вернуть URL первого редиректа (Location срыв srv1),
+// потому что клиент настроен останавливаться после ПЕРВОГО редиректа
+// (`return http.ErrUseLastResponse`).
+func TestGetRedirect_StopsAfterFirstRedirect(t *testing.T) {
+	srv2 := fakeRedirectServer(t, http.StatusOK, "")
+	srv1 := fakeRedirectServer(t, http.StatusFound, srv2.URL)
 
-	_, err := GetRedirect(srv.URL)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "200")
-}
-
-func TestGetRedirect_DoubleRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", "https://final.com")
-		w.WriteHeader(http.StatusFound)
-	}))
-	defer srv.Close()
-
-	location, err := GetRedirect(srv.URL)
+	location, err := GetRedirect(srv1.URL)
 	require.NoError(t, err)
-	assert.Equal(t, "https://final.com", location)
+	assert.Equal(t, srv2.URL, location,
+		"клиент должен остановиться на первом редиректе и вернуть его Location")
 }

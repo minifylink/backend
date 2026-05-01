@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,25 +180,85 @@ func TestIntegration_Statistics_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "link not found")
 }
 
-// Сценарий 9: Процентное распределение устройств — граничный
+// Сценарий 9: Процентное распределение устройств — граничный.
+//
+// Тест разбит на два подкейса:
+//  1. целочисленное деление (75/25) — проверяет базовую формулу;
+//  2. нецелое деление (1/3 desktop / mobile) — проверяет округление до целого
+//     процента. ВАЖНО: при %.0f Go округляет half-to-even (banker's rounding):
+//     33.333 → 33, 66.666 → 67. Сумма может дать НЕ 100%.
+//     Проверяем актуальное поведение, чтобы случайное изменение формата
+//     (например, переход на %.1f) сразу подсветило breaking change.
 func TestIntegration_Statistics_DevicePercentages(t *testing.T) {
-	cleanTables(t)
-
-	err := sharedStorage.SaveLink("https://example.com", "devpct")
-	require.NoError(t, err)
-
-	for i := 0; i < 3; i++ {
-		_, err = sharedStorage.GetLink("devpct", "Russia", "desktop", "Chrome")
+	t.Run("integer_division_75_25", func(t *testing.T) {
+		cleanTables(t)
+		require.NoError(t, sharedStorage.SaveLink("https://example.com", "devpct"))
+		for i := 0; i < 3; i++ {
+			_, err := sharedStorage.GetLink("devpct", "Russia", "desktop", "Chrome")
+			require.NoError(t, err)
+		}
+		_, err := sharedStorage.GetLink("devpct", "Russia", "mobile", "Safari")
 		require.NoError(t, err)
-	}
-	_, err = sharedStorage.GetLink("devpct", "Russia", "mobile", "Safari")
-	require.NoError(t, err)
 
-	stats, err := sharedStorage.GetStatistic("devpct")
-	require.NoError(t, err)
-	assert.Equal(t, 4, stats.Clicks)
-	assert.Equal(t, "75%", stats.Devices["desktop"])
-	assert.Equal(t, "25%", stats.Devices["mobile"])
+		stats, err := sharedStorage.GetStatistic("devpct")
+		require.NoError(t, err)
+		assert.Equal(t, 4, stats.Clicks)
+		assert.Equal(t, "75%", stats.Devices["desktop"])
+		assert.Equal(t, "25%", stats.Devices["mobile"])
+	})
+
+	t.Run("rounding_one_third", func(t *testing.T) {
+		cleanTables(t)
+		require.NoError(t, sharedStorage.SaveLink("https://example.com", "devrnd"))
+		// 1 desktop + 2 mobile → 33.33% / 66.66%
+		_, err := sharedStorage.GetLink("devrnd", "Russia", "desktop", "Chrome")
+		require.NoError(t, err)
+		for i := 0; i < 2; i++ {
+			_, err := sharedStorage.GetLink("devrnd", "Russia", "mobile", "Safari")
+			require.NoError(t, err)
+		}
+
+		stats, err := sharedStorage.GetStatistic("devrnd")
+		require.NoError(t, err)
+		assert.Equal(t, 3, stats.Clicks)
+		// Sprintf("%.0f", 33.333) → "33", Sprintf("%.0f", 66.666) → "67".
+		assert.Equal(t, "33%", stats.Devices["desktop"])
+		assert.Equal(t, "67%", stats.Devices["mobile"])
+	})
+}
+
+// TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20 — настоящие BVA по
+// ограничению schema `links.short_id VARCHAR(20)`.
+//
+// Это именно то место, где проверяется реальная граница: unit-тесты её ловить
+// не должны (хэндлер длину не валидирует), и поэтому раньше проявлялся
+// рассинхрон unit↔БД (unit давал успех на 100 символах, а БД отклоняла).
+func TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20(t *testing.T) {
+	cases := []struct {
+		name      string
+		length    int
+		wantError bool
+	}{
+		{"len=19_below_limit", 19, false},
+		{"len=20_at_limit", 20, false},
+		{"len=21_above_limit", 21, true}, // VARCHAR(20) — превышение значения
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cleanTables(t)
+			id := strings.Repeat("a", tc.length)
+			err := sharedStorage.SaveLink("https://example.com", id)
+			if tc.wantError {
+				require.Error(t, err, "БД должна отвергнуть short_id длиннее 20 символов")
+			} else {
+				require.NoError(t, err)
+				link, err := sharedStorage.GetLink(id, "local", "desktop", "Chrome")
+				require.NoError(t, err)
+				assert.Equal(t, "https://example.com", link)
+			}
+		})
+	}
 }
 
 // Сценарий 10: Множественные страны — позитивный
@@ -235,22 +296,58 @@ func TestIntegration_GetLink_EmptyAnalyticsFields(t *testing.T) {
 	assert.Equal(t, 1, stats.Clicks)
 }
 
-// Сценарий 12: Идемпотентность создания таблиц — позитивный
+// Сценарий 12: Идемпотентность создания таблиц.
+//
+// Прежний тест проверял лишь то, что после повторного `New()` можно прочитать
+// данные — это не доказывает идемпотентность DDL (например, `ALTER` мог
+// что-то поменять, но `SELECT` всё ещё работает). Здесь:
+//  1. снимаем имена и количество колонок в `links` через information_schema;
+//  2. вызываем `New()` второй раз;
+//  3. сравниваем снимки до/после — они должны совпасть.
 func TestIntegration_New_IdempotentTableCreation(t *testing.T) {
 	cleanTables(t)
+	require.NoError(t, sharedStorage.SaveLink("https://test.com", "idem"))
 
-	err := sharedStorage.SaveLink("https://test.com", "idem")
+	type colInfo struct {
+		name     string
+		dataType string
+		nullable string
+	}
+	snapshot := func(t *testing.T, table string) []colInfo {
+		t.Helper()
+		rows, err := sharedStorage.db.Query(`
+			SELECT column_name, data_type, is_nullable
+			FROM information_schema.columns
+			WHERE table_name = $1 ORDER BY ordinal_position`, table)
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []colInfo
+		for rows.Next() {
+			var c colInfo
+			require.NoError(t, rows.Scan(&c.name, &c.dataType, &c.nullable))
+			out = append(out, c)
+		}
+		return out
+	}
+
+	tablesBefore := map[string][]colInfo{
+		"links":     snapshot(t, "links"),
+		"users":     snapshot(t, "users"),
+		"analytics": snapshot(t, "analytics"),
+	}
+
+	// Повторный вызов: New() должен идемпотентно создать таблицы (CREATE TABLE IF NOT EXISTS).
+	storage2, err := New(sharedCfg, slogdiscard.NewDiscardLogger())
 	require.NoError(t, err)
+	require.NotNil(t, storage2)
 
-	// Повторный вызов New — таблицы уже существуют
-	log := slogdiscard.NewDiscardLogger()
-	storage2, err := New(sharedCfg, log)
-	require.NoError(t, err)
+	for tbl, before := range tablesBefore {
+		assert.Equal(t, before, snapshot(t, tbl),
+			"схема таблицы %s не должна измениться после повторного New()", tbl)
+	}
 
-	// Данные сохранились
+	// Данные тоже на месте.
 	link, err := storage2.GetLink("idem", "local", "desktop", "test")
 	require.NoError(t, err)
 	assert.Equal(t, "https://test.com", link)
-
-	_ = fmt.Sprintf("storage2=%p", storage2)
 }

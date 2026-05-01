@@ -18,323 +18,360 @@ import (
 	"backend/internal/lib/logger/slogdiscard"
 )
 
-func TestSaveHandler(t *testing.T) {
+// newHandler — общий конструктор для unit-тестов сохранения.
+func newHandler(t *testing.T) (http.HandlerFunc, *mocks.LinkSaver) {
+	t.Helper()
+	mock := mocks.NewLinkSaver(t)
+	return save.New(slogdiscard.NewDiscardLogger(), mock), mock
+}
+
+// doSave — отправляет POST /save с заданным телом и возвращает (статус, тело).
+func doSave(t *testing.T, handler http.HandlerFunc, body []byte) (int, save.Response) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/save", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var resp save.Response
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	return rr.Code, resp
+}
+
+func mustJSON(link, shortID string) []byte {
+	return []byte(fmt.Sprintf(`{"link": %q, "short_id": %q}`, link, shortID))
+}
+
+// TestSaveHandler_TableDriven — основной table-driven с применением:
+//   - класса эквивалентности (валидный/невалидный URL/short_id),
+//   - граничных условий (пустые поля, невалидный JSON, отсутствующее тело),
+//   - негативных сценариев (ошибки от LinkSaver).
+//
+// Для каждого case проверяются ВСЕ значимые поля ответа:
+// статус-код, status="OK"/"Error", error-сообщение, short_id (для успеха).
+func TestSaveHandler_TableDriven(t *testing.T) {
 	cases := []struct {
-		name      string
-		alias     string
-		url       string
-		respError string
-		mockError error
-		rawBody   *string
+		name           string
+		alias          string
+		url            string
+		rawBody        *string
+		mockError      error
+		expectMockCall bool
+		wantStatus     string
+		wantErrSubstr  string // для ошибок проверяем substring (не хардкодим английский хвост валидатора)
+		wantShortID    string
 	}{
 		{
-			name:  "Success",
-			alias: "test_alias",
-			url:   "https://google.com",
+			name:           "Success",
+			alias:          "ok_alias",
+			url:            "https://google.com",
+			expectMockCall: true,
+			wantStatus:     "OK",
+			wantShortID:    "ok_alias",
 		},
 		{
-			name:      "Empty alias",
-			alias:     "",
-			url:       "https://google.com",
-			respError: "shortID cannot be empty",
+			name:           "SaveURL Error",
+			alias:          "test_alias",
+			url:            "https://google.com",
+			mockError:      errors.New("unexpected error"),
+			expectMockCall: true,
+			wantStatus:     "Error",
+			wantErrSubstr:  "failed to add link",
 		},
 		{
-			name:      "Empty URL",
-			url:       "",
-			alias:     "some_alias",
-			respError: "field Link is a required field",
+			name:           "ShortID Already Exists",
+			alias:          "existing_alias",
+			url:            "https://google.com",
+			mockError:      errors.New("repository.SaveLink: short id already exists"),
+			expectMockCall: true,
+			wantStatus:     "Error",
+			wantErrSubstr:  "shortID already exists",
 		},
 		{
-			name:      "Invalid URL",
-			url:       "some invalid URL",
-			alias:     "some_alias",
-			respError: "field Link is not a valid URL",
+			name:          "Empty alias",
+			alias:         "",
+			url:           "https://google.com",
+			wantStatus:    "Error",
+			wantErrSubstr: "shortID cannot be empty",
 		},
 		{
-			name:      "SaveURL Error",
-			alias:     "test_alias",
-			url:       "https://google.com",
-			respError: "failed to add link",
-			mockError: errors.New("unexpected error"),
+			name:          "Empty URL",
+			url:           "",
+			alias:         "some_alias",
+			wantStatus:    "Error",
+			wantErrSubstr: "field Link", // имя поля стабильно; английский хвост валидатора не хардкодим
 		},
 		{
-			name:      "Empty Body",
-			rawBody:   strPtr(""),
-			respError: "empty request",
+			name:          "Invalid URL",
+			url:           "some invalid URL",
+			alias:         "some_alias",
+			wantStatus:    "Error",
+			wantErrSubstr: "field Link",
 		},
 		{
-			name:      "Invalid JSON",
-			rawBody:   strPtr("{invalid}"),
-			respError: "failed to decode request",
+			name:          "Empty Body",
+			rawBody:       strPtr(""),
+			wantStatus:    "Error",
+			wantErrSubstr: "empty request",
 		},
 		{
-			name:      "ShortID Already Exists",
-			alias:     "existing_alias",
-			url:       "https://google.com",
-			respError: "shortID already exists",
-			mockError: errors.New("repository.SaveLink: short id already exists"),
+			name:          "Invalid JSON",
+			rawBody:       strPtr("{invalid}"),
+			wantStatus:    "Error",
+			wantErrSubstr: "failed to decode",
 		},
 	}
 
 	for _, tc := range cases {
 		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			linkSaverMock := mocks.NewLinkSaver(t)
-
-			if tc.respError == "" || tc.mockError != nil {
-				linkSaverMock.On("SaveLink", tc.url, tc.alias).
-					Return(tc.mockError).
-					Once()
+			handler, mock := newHandler(t)
+			if tc.expectMockCall {
+				mock.On("SaveLink", tc.url, tc.alias).Return(tc.mockError).Once()
 			}
 
-			handler := save.New(slogdiscard.NewDiscardLogger(), linkSaverMock)
-
-			var req *http.Request
-			var err error
+			var body []byte
 			if tc.rawBody != nil {
-				req, err = http.NewRequest(http.MethodPost, "/save", bytes.NewReader([]byte(*tc.rawBody)))
+				body = []byte(*tc.rawBody)
 			} else {
-				input := fmt.Sprintf(`{"link": "%s", "short_id": "%s"}`, tc.url, tc.alias)
-				req, err = http.NewRequest(http.MethodPost, "/save", bytes.NewReader([]byte(input)))
+				body = mustJSON(tc.url, tc.alias)
 			}
-			require.NoError(t, err)
 
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			code, resp := doSave(t, handler, body)
 
-			require.Equal(t, rr.Code, http.StatusOK)
+			require.Equal(t, http.StatusOK, code,
+				"API всегда отдаёт 200; см. примечание про антипаттерн REST в README")
+			assert.Equal(t, tc.wantStatus, resp.Status)
 
-			body := rr.Body.String()
+			if tc.wantErrSubstr != "" {
+				assert.Contains(t, resp.Error, tc.wantErrSubstr,
+					"ожидаем подстроку %q в error", tc.wantErrSubstr)
+			} else {
+				assert.Empty(t, resp.Error)
+			}
 
-			var resp save.Response
-
-			require.NoError(t, json.Unmarshal([]byte(body), &resp))
-
-			require.Equal(t, tc.respError, resp.Error)
+			if tc.wantShortID != "" {
+				assert.Equal(t, tc.wantShortID, resp.ShortID)
+			}
 		})
 	}
 }
 
 func strPtr(s string) *string { return &s }
 
-// New tests
-
-func TestSaveHandler_SuccessResponseStatus(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
+// TestSaveHandler_Success_FullResponse — позитивный путь, проверяющий
+// сразу status, error и short_id одним тестом. Заменяет прежние
+// `_SuccessResponseStatus` и `_SuccessReturnsShortID`,
+// которые делили один сценарий на два.
+func TestSaveHandler_Success_FullResponse(t *testing.T) {
+	handler, mock := newHandler(t)
 	mock.On("SaveLink", "https://example.com", "myid").Return(nil).Once()
 
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
+	code, resp := doSave(t, handler, mustJSON("https://example.com", "myid"))
 
-	body := `{"link": "https://example.com", "short_id": "myid"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	assert.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "OK", resp.Status)
-}
-
-func TestSaveHandler_SuccessReturnsShortID(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "https://example.com", "myid").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "https://example.com", "short_id": "myid"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	assert.Empty(t, resp.Error)
 	assert.Equal(t, "myid", resp.ShortID)
 }
 
+// TestSaveHandler_ShortIDBoundary_VARCHAR20 — BVA для длины short_id,
+// привязанная к РЕАЛЬНОМУ ограничению БД: schema `links.short_id VARCHAR(20)`.
+//
+// Хэндлер сам длину не валидирует — поэтому unit-тест проверяет
+// только то, что значение пробрасывается в LinkSaver без модификации.
+// Что именно происходит при длине > 20 — задача integration-теста
+// `TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20`.
+func TestSaveHandler_ShortIDBoundary_VARCHAR20(t *testing.T) {
+	cases := []struct {
+		name   string
+		length int
+	}{
+		{"len=19_below_limit", 19},
+		{"len=20_at_limit", 20},
+		{"len=21_above_limit", 21},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			id := strings.Repeat("x", tc.length)
+			handler, mock := newHandler(t)
+			mock.On("SaveLink", "https://example.com", id).Return(nil).Once()
+
+			code, resp := doSave(t, handler, mustJSON("https://example.com", id))
+
+			assert.Equal(t, http.StatusOK, code)
+			assert.Equal(t, "OK", resp.Status,
+				"unit-уровень: длина не валидируется хэндлером, ожидаем успех")
+			assert.Equal(t, id, resp.ShortID)
+		})
+	}
+}
+
+// TestSaveHandler_VeryLongURL — URL длиной 2000+ символов. Хэндлер длину URL
+// не лимитирует; проверяем, что full-response корректен.
+//
+// NB: 2000 — взятая с потолка длина. Если в FS появится явный лимит на URL,
+// этот тест надо переделать как BVA по этому лимиту (N-1, N, N+1).
 func TestSaveHandler_VeryLongURL(t *testing.T) {
 	longURL := "https://example.com/" + strings.Repeat("a", 2000)
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", longURL, "long").Return(nil).Once()
+	handler, mock := newHandler(t)
+	mock.On("SaveLink", longURL, "longurl").Return(nil).Once()
 
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
+	code, resp := doSave(t, handler, mustJSON(longURL, "longurl"))
 
-	body := fmt.Sprintf(`{"link": "%s", "short_id": "long"}`, longURL)
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "OK", resp.Status)
+	assert.Empty(t, resp.Error)
+	assert.Equal(t, "longurl", resp.ShortID)
+}
+
+// TestSaveHandler_AcceptsValidShortIDFormats — представители разных классов
+// эквивалентности валидных short_id: ASCII со спецсимволами, юникод.
+// Объединяет прежние `_SpecialCharsInShortID` и `_UnicodeShortID` (один путь кода).
+func TestSaveHandler_AcceptsValidShortIDFormats(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"ascii_with_dash_underscore_digits", "test-alias_123"},
+		{"unicode_cyrillic", "тест"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			handler, mock := newHandler(t)
+			mock.On("SaveLink", "https://example.com", tc.id).Return(nil).Once()
+
+			code, resp := doSave(t, handler, mustJSON("https://example.com", tc.id))
+
+			assert.Equal(t, http.StatusOK, code)
+			assert.Equal(t, "OK", resp.Status)
+			assert.Equal(t, tc.id, resp.ShortID)
+		})
+	}
+}
+
+// TestSaveHandler_AcceptsValidURLFormats — URL с query/fragment/http — все валидны
+// с точки зрения validator.url; для всех ожидаем успех. Объединяет прежние
+// `_URLWithQueryParams`, `_URLWithFragment`, `_HTTPUrl`.
+func TestSaveHandler_AcceptsValidURLFormats(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"http_no_tls", "http://example.com"},
+		{"with_query", "https://example.com/path?a=1&b=2"},
+		{"with_fragment", "https://example.com/page#section"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			handler, mock := newHandler(t)
+			mock.On("SaveLink", tc.url, "vid").Return(nil).Once()
+
+			code, resp := doSave(t, handler, mustJSON(tc.url, "vid"))
+
+			assert.Equal(t, http.StatusOK, code)
+			assert.Equal(t, "OK", resp.Status)
+			assert.Empty(t, resp.Error)
+		})
+	}
+}
+
+// TestSaveHandler_FTPUrl_IsAccepted — фиксирует ТЕКУЩЕЕ поведение validator.url:
+// схема ftp:// признаётся валидным URL (см. validate тег `url` в save.Request).
+// Прежний тест использовал `Maybe()` и проверял только статус-код — то есть
+// фактически НЕ ПРОВЕРЯЛ, что происходит. Здесь поведение зафиксировано явно;
+// если в FS появится политика «только http/https», тест нужно инвертировать.
+func TestSaveHandler_FTPUrl_IsAccepted(t *testing.T) {
+	handler, mock := newHandler(t)
+	mock.On("SaveLink", "ftp://example.com", "ftp_id").Return(nil).Once()
+
+	code, resp := doSave(t, handler, mustJSON("ftp://example.com", "ftp_id"))
+
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "OK", resp.Status, "ftp:// сейчас принимается валидатором")
+	assert.Empty(t, resp.Error)
+	assert.Equal(t, "ftp_id", resp.ShortID)
+}
+
+// TestSaveHandler_ContentType_IsIgnored — render.DecodeJSON разбирает тело
+// независимо от заголовка Content-Type. Прежний тест использовал `Maybe()`
+// и проверял только StatusOK — то есть поведение оставалось неопределённым.
+// Здесь явно фиксируем: text/plain с JSON в теле → успешно сохраняем.
+func TestSaveHandler_ContentType_IsIgnored(t *testing.T) {
+	handler, mock := newHandler(t)
+	mock.On("SaveLink", "https://example.com", "ctid").Return(nil).Once()
+
+	body := mustJSON("https://example.com", "ctid")
+	req := httptest.NewRequest(http.MethodPost, "/save", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
 	var resp save.Response
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
 
-func TestSaveHandler_VeryLongShortID(t *testing.T) {
-	longID := strings.Repeat("x", 100)
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "https://example.com", longID).Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := fmt.Sprintf(`{"link": "https://example.com", "short_id": "%s"}`, longID)
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_SpecialCharsInShortID(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "https://example.com", "test-alias_123").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "https://example.com", "short_id": "test-alias_123"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_UnicodeShortID(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "https://example.com", "тест").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "https://example.com", "short_id": "тест"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_URLWithQueryParams(t *testing.T) {
-	url := "https://example.com/path?a=1&b=2"
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", url, "qp").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := fmt.Sprintf(`{"link": "%s", "short_id": "qp"}`, url)
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_URLWithFragment(t *testing.T) {
-	url := "https://example.com/page#section"
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", url, "frag").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := fmt.Sprintf(`{"link": "%s", "short_id": "frag"}`, url)
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_HTTPUrl(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "http://example.com", "http").Return(nil).Once()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "http://example.com", "short_id": "http"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
-}
-
-func TestSaveHandler_FTPUrl(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "ftp://example.com", "ftp").Return(nil).Maybe()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "ftp://example.com", "short_id": "ftp"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	// ftp:// may or may not be considered a valid URL by the validator
 	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "OK", resp.Status, "Content-Type должен игнорироваться при разборе тела")
+	assert.Empty(t, resp.Error)
 }
 
-func TestSaveHandler_MissingLinkField(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
+// TestSaveHandler_MissingFields — отсутствие обязательных полей в JSON.
+// Заменяет прежние `_MissingLinkField` и `_MissingShortIDField`,
+// объединяя их в одну табличную проверку.
+func TestSaveHandler_MissingFields(t *testing.T) {
+	cases := []struct {
+		name          string
+		body          string
+		wantErrSubstr string
+	}{
+		{
+			name:          "missing_link",
+			body:          `{"short_id": "abc"}`,
+			wantErrSubstr: "field Link", // имя поля стабильно; не хардкодим хвост
+		},
+		{
+			name:          "missing_short_id",
+			body:          `{"link": "https://example.com"}`,
+			wantErrSubstr: "shortID cannot be empty",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			handler, _ := newHandler(t)
 
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
+			code, resp := doSave(t, handler, []byte(tc.body))
 
-	body := `{"short_id": "abc"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Contains(t, resp.Error, "required field")
+			assert.Equal(t, http.StatusOK, code)
+			assert.Equal(t, "Error", resp.Status)
+			assert.Contains(t, resp.Error, tc.wantErrSubstr)
+		})
+	}
 }
 
-func TestSaveHandler_MissingShortIDField(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "https://example.com"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Equal(t, "shortID cannot be empty", resp.Error)
-}
-
+// TestSaveHandler_ExtraFields — лишние поля в JSON игнорируются (decoder
+// пропускает их). Mock явно проверяет, что в SaveLink ушли ровно (link, short_id),
+// а не что-то ещё.
 func TestSaveHandler_ExtraFields(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
+	handler, mock := newHandler(t)
 	mock.On("SaveLink", "https://example.com", "extra").Return(nil).Once()
 
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
+	body := []byte(`{"link": "https://example.com", "short_id": "extra", "foo": "bar", "baz": 123}`)
+	code, resp := doSave(t, handler, body)
 
-	body := `{"link": "https://example.com", "short_id": "extra", "foo": "bar", "baz": 123}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	var resp save.Response
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Error)
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "OK", resp.Status)
+	assert.Equal(t, "extra", resp.ShortID)
 }
 
+// TestSaveHandler_NullBody — POST без тела (nil reader) → "empty request".
 func TestSaveHandler_NullBody(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
+	handler, _ := newHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/save", nil)
 	rr := httptest.NewRecorder()
@@ -342,21 +379,7 @@ func TestSaveHandler_NullBody(t *testing.T) {
 
 	var resp save.Response
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	assert.NotEmpty(t, resp.Error)
-}
 
-func TestSaveHandler_ContentTypeNotJSON(t *testing.T) {
-	mock := mocks.NewLinkSaver(t)
-	mock.On("SaveLink", "https://example.com", "ct").Return(nil).Maybe()
-
-	handler := save.New(slogdiscard.NewDiscardLogger(), mock)
-
-	body := `{"link": "https://example.com", "short_id": "ct"}`
-	req := httptest.NewRequest(http.MethodPost, "/save", strings.NewReader(body))
-	req.Header.Set("Content-Type", "text/plain")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	// render.DecodeJSON should still work regardless of Content-Type
-	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "Error", resp.Status)
+	assert.Contains(t, resp.Error, "empty")
 }

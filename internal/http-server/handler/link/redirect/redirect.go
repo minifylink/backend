@@ -123,8 +123,6 @@ func getIP(r *http.Request) string {
 }
 
 // CountryFetcher — интерфейс получения страны по публичному IP.
-// Введён ради тестируемости нелокальной ветки getCountry: дефолтная
-// реализация ходит в ip-api.com по HTTP, а в тестах подменяется fake'ом.
 type CountryFetcher interface {
 	Fetch(ip string) (string, error)
 }
@@ -149,7 +147,6 @@ func (httpCountryFetcher) Fetch(ip string) (string, error) {
 }
 
 // countryFetcher — пакетная переменная, которую тесты подменяют через t.Cleanup.
-// В продакшне используется httpCountryFetcher.
 var countryFetcher CountryFetcher = &httpCountryFetcher{}
 
 func getCountry(ip string) (string, error) {

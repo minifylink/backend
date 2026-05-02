@@ -1,6 +1,7 @@
 package response
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
@@ -131,4 +132,50 @@ func TestValidationError_EmptySlice(t *testing.T) {
 	r := ValidationError(errs)
 	assert.Equal(t, StatusError, r.Status)
 	assert.Empty(t, r.Error)
+}
+
+// === ТЕСТЫ JSON-КОНТРАКТА (golden-файл-стиль) ===
+//
+// До этого момента все тесты проверяли поля Response через прямой доступ
+// (.Status, .Error). Это НЕ покрывает JSON-имена полей — кто-то может
+// поменять `json:"status"` на `json:"Status"` или удалить `omitempty`,
+// и Go-тесты пройдут, а фронт сломается.
+//
+// Тесты ниже сериализуют структуру и сравнивают результат с эталонной
+// JSON-строкой через assert.JSONEq (сравнение по структуре, без учёта
+// порядка ключей). Это контракт, который видит фронт.
+
+// TestOK_SerializesToJSON — OK() сериализуется в `{"status":"OK"}`.
+// Поле error НЕ должно появляться в JSON (omitempty при пустой строке).
+func TestOK_SerializesToJSON(t *testing.T) {
+	r := OK()
+	bytes, err := json.Marshal(r)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status":"OK"}`, string(bytes),
+		"omitempty должен скрыть пустое поле error")
+}
+
+// TestError_SerializesToJSON — Error("msg") даёт `{"status":"Error","error":"msg"}`.
+// Поле error должно ПОЯВИТЬСЯ в JSON (омитим только при пустой строке).
+func TestError_SerializesToJSON(t *testing.T) {
+	r := Error("something went wrong")
+	bytes, err := json.Marshal(r)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status":"Error","error":"something went wrong"}`, string(bytes))
+}
+
+// TestValidationError_SerializesToJSON — ValidationError() даёт корректный JSON
+// с собранным сообщением. Используется для проверки полного цикла:
+// валидатор → ValidationError → JSON.
+func TestValidationError_SerializesToJSON(t *testing.T) {
+	v := validator.New()
+	err := v.Struct(requiredStruct{Name: ""})
+	require.Error(t, err)
+
+	r := ValidationError(err.(validator.ValidationErrors))
+	bytes, err := json.Marshal(r)
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"status":"Error","error":"field Name is a required field"}`,
+		string(bytes))
 }

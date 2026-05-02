@@ -9,11 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIsPrivateIP — единый табличный тест, в котором каждый case явно помечен
-// своим классом эквивалентности. Прежний разнос на четыре функции
-// (TestIsPrivateIP / _InvalidIP / _IPv6Loopback / _PublicIP) дублировал
-// представителей класса EQ_invalid (в TestIsPrivateIP было "not-an-ip",
-// в _InvalidIP — ещё три), что нарушало принцип «один тест — один класс».
+// TestIsPrivateIP — табличный тест по 5 классам эквивалентности.
+// Принцип EP: один представитель на класс. Дополнительные представители
+// внутри класса не находят новых багов.
 func TestIsPrivateIP(t *testing.T) {
 	cases := []struct {
 		name string
@@ -21,18 +19,15 @@ func TestIsPrivateIP(t *testing.T) {
 		want bool
 	}{
 		// EQ_invalid: парсер net.ParseIP вернёт nil → функция возвращает false
-		{"invalid_garbage", "garbage", false},
-		{"invalid_empty", "", false},
-		{"invalid_octets_overflow", "999.999.999.999", false},
-		// EQ_private_v4: попадает под net.IP.IsPrivate()
-		{"private_v4_192_168", "192.168.1.1", true},
-		// EQ_loopback_v4: попадает под net.IP.IsLoopback()
-		{"loopback_v4_127", "127.0.0.1", true},
-		// EQ_loopback_v6: граничный случай — IPv6 loopback
+		{"invalid", "garbage", false},
+		// EQ_private_v4: попадает под net.IP.IsPrivate() (RFC 1918)
+		{"private_v4", "192.168.1.1", true},
+		// EQ_loopback_v4: попадает под net.IP.IsLoopback() (127.0.0.0/8)
+		{"loopback_v4", "127.0.0.1", true},
+		// EQ_loopback_v6: граничный случай — IPv6 loopback (::1)
 		{"loopback_v6", "::1", true},
 		// EQ_public: ни IsPrivate, ни IsLoopback — возвращаем false
-		{"public_google_dns", "8.8.8.8", false},
-		{"public_cloudflare_dns", "1.1.1.1", false},
+		{"public", "8.8.8.8", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

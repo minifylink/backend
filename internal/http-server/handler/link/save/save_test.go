@@ -160,10 +160,7 @@ func TestSaveHandler_TableDriven(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// TestSaveHandler_Success_FullResponse — позитивный путь, проверяющий
-// сразу status, error и short_id одним тестом. Заменяет прежние
-// `_SuccessResponseStatus` и `_SuccessReturnsShortID`,
-// которые делили один сценарий на два.
+// TestSaveHandler_Success_FullResponse — позитивный: проверяем сразу status, error и short_id.
 func TestSaveHandler_Success_FullResponse(t *testing.T) {
 	handler, mock := newHandler(t)
 	mock.On("SaveLink", "https://example.com", "myid").Return(nil).Once()
@@ -228,9 +225,7 @@ func TestSaveHandler_VeryLongURL(t *testing.T) {
 	assert.Equal(t, "longurl", resp.ShortID)
 }
 
-// TestSaveHandler_AcceptsValidShortIDFormats — представители разных классов
-// эквивалентности валидных short_id: ASCII со спецсимволами, юникод.
-// Объединяет прежние `_SpecialCharsInShortID` и `_UnicodeShortID` (один путь кода).
+// TestSaveHandler_AcceptsValidShortIDFormats — валидные short_id: ASCII со спецсимволами и юникод.
 func TestSaveHandler_AcceptsValidShortIDFormats(t *testing.T) {
 	cases := []struct {
 		name string
@@ -254,9 +249,7 @@ func TestSaveHandler_AcceptsValidShortIDFormats(t *testing.T) {
 	}
 }
 
-// TestSaveHandler_AcceptsValidURLFormats — URL с query/fragment/http — все валидны
-// с точки зрения validator.url; для всех ожидаем успех. Объединяет прежние
-// `_URLWithQueryParams`, `_URLWithFragment`, `_HTTPUrl`.
+// TestSaveHandler_AcceptsValidURLFormats — http/query/fragment — все валидны для validator.url.
 func TestSaveHandler_AcceptsValidURLFormats(t *testing.T) {
 	cases := []struct {
 		name string
@@ -281,11 +274,8 @@ func TestSaveHandler_AcceptsValidURLFormats(t *testing.T) {
 	}
 }
 
-// TestSaveHandler_FTPUrl_IsAccepted — фиксирует ТЕКУЩЕЕ поведение validator.url:
-// схема ftp:// признаётся валидным URL (см. validate тег `url` в save.Request).
-// Прежний тест использовал `Maybe()` и проверял только статус-код — то есть
-// фактически НЕ ПРОВЕРЯЛ, что происходит. Здесь поведение зафиксировано явно;
-// если в FS появится политика «только http/https», тест нужно инвертировать.
+// TestSaveHandler_FTPUrl_IsAccepted — validator.url принимает ftp://.
+// Если появится политика «только http/https» — тест инвертировать.
 func TestSaveHandler_FTPUrl_IsAccepted(t *testing.T) {
 	handler, mock := newHandler(t)
 	mock.On("SaveLink", "ftp://example.com", "ftp_id").Return(nil).Once()
@@ -298,10 +288,8 @@ func TestSaveHandler_FTPUrl_IsAccepted(t *testing.T) {
 	assert.Equal(t, "ftp_id", resp.ShortID)
 }
 
-// TestSaveHandler_ContentType_IsIgnored — render.DecodeJSON разбирает тело
-// независимо от заголовка Content-Type. Прежний тест использовал `Maybe()`
-// и проверял только StatusOK — то есть поведение оставалось неопределённым.
-// Здесь явно фиксируем: text/plain с JSON в теле → успешно сохраняем.
+// TestSaveHandler_ContentType_IsIgnored — render.DecodeJSON парсит тело независимо
+// от Content-Type: text/plain с JSON в теле → успешно сохраняем.
 func TestSaveHandler_ContentType_IsIgnored(t *testing.T) {
 	handler, mock := newHandler(t)
 	mock.On("SaveLink", "https://example.com", "ctid").Return(nil).Once()
@@ -320,9 +308,7 @@ func TestSaveHandler_ContentType_IsIgnored(t *testing.T) {
 	assert.Empty(t, resp.Error)
 }
 
-// TestSaveHandler_MissingFields — отсутствие обязательных полей в JSON.
-// Заменяет прежние `_MissingLinkField` и `_MissingShortIDField`,
-// объединяя их в одну табличную проверку.
+// TestSaveHandler_MissingFields — отсутствие обязательных полей в JSON: link и short_id.
 func TestSaveHandler_MissingFields(t *testing.T) {
 	cases := []struct {
 		name          string

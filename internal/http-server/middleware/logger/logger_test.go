@@ -38,14 +38,8 @@ func TestLoggerMiddleware_CallsNext(t *testing.T) {
 // Покрываем ДВА разных code path'а в chi.middleware.WrapResponseWriter:
 //
 //  1. explicit_status_and_body — next-handler ЯВНО вызывает WriteHeader(N) + Write(...).
-//     Проверяет, что middleware не подменяет статус и не съедает body.
-//
-//  2. implicit_200 — next-handler ТОЛЬКО Write(...), без WriteHeader.
-//     Это другая ветка в WrapResponseWriter (implicit-status track).
-//
-// Один представитель статуса (201) достаточен: middleware не зависит от значения
-// статус-кода. Прежние подкейсы preserves_500 и preserves_body были представителями
-// тех же двух классов и не находили дополнительных багов.
+//  2. implicit_200 — next-handler ТОЛЬКО Write(...), без WriteHeader (другая ветка в WrapResponseWriter).
+// Один представитель статуса достаточен: middleware от значения статус-кода не зависит.
 func TestLoggerMiddleware_PreservesResponse(t *testing.T) {
 	t.Run("explicit_status_and_body", func(t *testing.T) {
 		mw := newMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

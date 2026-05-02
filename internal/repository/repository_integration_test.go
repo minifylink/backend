@@ -227,12 +227,9 @@ func TestIntegration_Statistics_DevicePercentages(t *testing.T) {
 	})
 }
 
-// TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20 — настоящие BVA по
-// ограничению schema `links.short_id VARCHAR(20)`.
-//
-// Это именно то место, где проверяется реальная граница: unit-тесты её ловить
-// не должны (хэндлер длину не валидирует), и поэтому раньше проявлялся
-// рассинхрон unit↔БД (unit давал успех на 100 символах, а БД отклоняла).
+// TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20 — BVA по реальной границе
+// schema links.short_id VARCHAR(20). Unit-тесты длину не валидируют, поэтому
+// единственное место, где «21 символ → ошибка» проверяется — здесь.
 func TestIntegration_SaveLink_ShortIDBoundary_VARCHAR20(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -296,14 +293,8 @@ func TestIntegration_GetLink_EmptyAnalyticsFields(t *testing.T) {
 	assert.Equal(t, 1, stats.Clicks)
 }
 
-// Сценарий 12: Идемпотентность создания таблиц.
-//
-// Прежний тест проверял лишь то, что после повторного `New()` можно прочитать
-// данные — это не доказывает идемпотентность DDL (например, `ALTER` мог
-// что-то поменять, но `SELECT` всё ещё работает). Здесь:
-//  1. снимаем имена и количество колонок в `links` через information_schema;
-//  2. вызываем `New()` второй раз;
-//  3. сравниваем снимки до/после — они должны совпасть.
+// Сценарий 12: идемпотентность создания таблиц через сравнение снимков
+// information_schema.columns до/после повторного New(). DDL не должен меняться.
 func TestIntegration_New_IdempotentTableCreation(t *testing.T) {
 	cleanTables(t)
 	require.NoError(t, sharedStorage.SaveLink("https://test.com", "idem"))

@@ -122,11 +122,17 @@ func getIP(r *http.Request) string {
 	return ip
 }
 
-func getCountry(ip string) (string, error) {
-	if isPrivateIP(ip) {
-		return "local", nil
-	}
+// CountryFetcher — интерфейс получения страны по публичному IP.
+// Введён ради тестируемости нелокальной ветки getCountry: дефолтная
+// реализация ходит в ip-api.com по HTTP, а в тестах подменяется fake'ом.
+type CountryFetcher interface {
+	Fetch(ip string) (string, error)
+}
 
+// httpCountryFetcher — дефолтный fetcher: реальный HTTP-запрос к ip-api.com.
+type httpCountryFetcher struct{}
+
+func (httpCountryFetcher) Fetch(ip string) (string, error) {
 	resp, err := http.Get("http://ip-api.com/json/" + ip)
 	if err != nil {
 		return "", err
@@ -140,6 +146,17 @@ func getCountry(ip string) (string, error) {
 		return "", err
 	}
 	return data.Country, nil
+}
+
+// countryFetcher — пакетная переменная, которую тесты подменяют через t.Cleanup.
+// В продакшне используется httpCountryFetcher.
+var countryFetcher CountryFetcher = &httpCountryFetcher{}
+
+func getCountry(ip string) (string, error) {
+	if isPrivateIP(ip) {
+		return "local", nil
+	}
+	return countryFetcher.Fetch(ip)
 }
 
 func isPrivateIP(ip string) bool {

@@ -35,15 +35,11 @@ func TestSetupLogger_KnownEnvs(t *testing.T) {
 	}
 }
 
-// TestSetupLogger_UnknownEnv_FallsBackToProd — все значения ENV вне множества
-// {local, dev, prod} попадают в default-ветку switch и трактуются как prod.
-//
-// Прежний тест-сьют имел ДВА теста для одного класса эквивалентности:
-// `_Unknown` ("unknown_env") и `_EmptyString` ("") — оба тестируют ОДИН и тот же
-// default-путь. Объединяем в один табличный тест с РАЗНЫМИ свойствами входа:
+// TestSetupLogger_UnknownEnv_FallsBackToProd — всё вне {local, dev, prod} → default = prod.
+// Три представителя одного класса с разными свойствами:
 //   - "" — пустая строка (граничный случай),
 //   - "unknown_env" — произвольная строка,
-//   - "PROD" — другой регистр (показывает, что switch case-sensitive).
+//   - "PROD" — другой регистр (switch case-sensitive).
 func TestSetupLogger_UnknownEnv_FallsBackToProd(t *testing.T) {
 	envs := []string{"", "unknown_env", "PROD"}
 	for _, env := range envs {

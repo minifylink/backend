@@ -26,7 +26,6 @@ func fakeRedirectServer(t *testing.T, status int, location string) *httptest.Ser
 }
 
 // TestGetRedirect_ReturnsLocation — позитивный путь: 302 + Location → возвращаем URL.
-// Объединяет прежние `_Success_302` и `_ReturnsLocationHeader` (одна логика).
 func TestGetRedirect_ReturnsLocation(t *testing.T) {
 	const target = "https://google.com/search?q=test"
 	srv := fakeRedirectServer(t, http.StatusFound, target)
@@ -63,6 +62,37 @@ func TestGetRedirect_NonRedirectStatuses(t *testing.T) {
 	}
 }
 
+// TestGetRedirect_StatusBoundary_302 — BVA точечной границы (api.go:29): принимаем
+// ровно 302, 301 и 303 отвергаем. 301/303 тоже редиректы по HTTP, но реализация их не пропускает.
+func TestGetRedirect_StatusBoundary_302(t *testing.T) {
+	const target = "https://example.com/destination"
+	cases := []struct {
+		name      string
+		status    int
+		wantError bool
+	}{
+		{"301_below_boundary_MovedPermanently", http.StatusMovedPermanently, true}, // 301 — отвергается
+		{"302_at_boundary_Found", http.StatusFound, false},                         // 302 — принимается
+		{"303_above_boundary_SeeOther", http.StatusSeeOther, true},                 // 303 — отвергается
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			srv := fakeRedirectServer(t, tc.status, target)
+
+			location, err := GetRedirect(srv.URL)
+			if tc.wantError {
+				require.Error(t, err, "статус %d не равен 302 → должен быть ErrInvalidStatusCode", tc.status)
+				assert.True(t, errors.Is(err, ErrInvalidStatusCode))
+				assert.Contains(t, err.Error(), strconv.Itoa(tc.status))
+			} else {
+				require.NoError(t, err, "статус 302 — единственный принимаемый")
+				assert.Equal(t, target, location)
+			}
+		})
+	}
+}
+
 // TestGetRedirect_InvalidURL — невалидный URL → сетевая/парс-ошибка от http.Client.
 func TestGetRedirect_InvalidURL(t *testing.T) {
 	_, err := GetRedirect("://invalid-url")
@@ -79,17 +109,9 @@ func TestGetRedirect_EmptyLocation(t *testing.T) {
 	assert.Empty(t, location)
 }
 
-// TestGetRedirect_StopsAfterFirstRedirect — НАСТОЯЩАЯ цепочка из двух серверов.
-// Прежний тест с тем же именем поднимал ОДИН сервер и не проверял
-// поведение клиента при нескольких хопах — был зелёный, но ничего не доказывал.
-//
-// Здесь:
-//   - srv2 — финальная страница, возвращает 200 (для GetRedirect это ошибка, ОК).
-//   - srv1 — первый редирект 302 → srv2.URL.
-//
-// GetRedirect должен вернуть URL первого редиректа (Location срыв srv1),
-// потому что клиент настроен останавливаться после ПЕРВОГО редиректа
-// (`return http.ErrUseLastResponse`).
+// TestGetRedirect_StopsAfterFirstRedirect — цепочка из двух серверов:
+// srv1 (302 → srv2.URL) и srv2 (200). GetRedirect должен вернуть Location от srv1
+// благодаря CheckRedirect=ErrUseLastResponse.
 func TestGetRedirect_StopsAfterFirstRedirect(t *testing.T) {
 	srv2 := fakeRedirectServer(t, http.StatusOK, "")
 	srv1 := fakeRedirectServer(t, http.StatusFound, srv2.URL)

@@ -19,10 +19,6 @@ import (
 // Если кто-то изменит StatusOK = "OK" на "ok" / "success" — компилятор
 // этого не поймает (это просто значение константы), а фронт сломается.
 // Этот тест защищает от такого breaking change.
-//
-// Прежде это был перебор: TestOK_Status + TestOK_NoError + TestError_*
-// с подкейсом «10000 символов» (последний — overtesting: компилятор Go
-// строки сам не обрезает, реалистичных багов кейс не находит).
 func TestResponseConstructors(t *testing.T) {
 	t.Run("OK", func(t *testing.T) {
 		r := OK()
@@ -65,13 +61,9 @@ type multiFieldStruct struct {
 	Link string `validate:"url"`
 }
 
-// TestValidationError_PerTag — три ветки `switch err.ActualTag()` в ValidationError.
-// Объединяет прежние `_RequiredTag` / `_UrlTag` / `_DefaultTag` в табличный тест,
-// где видно, что это **классы эквивалентности по тегу валидатора**.
-//
-// Хвосты сообщений ("is a required field" и т. п.) проверяются как substring,
-// потому что они ЗАДАНЫ ИМЕННО В response.go (не в чужой либе) — то есть
-// тест корректно отражает контракт, который задаёт сам код.
+// TestValidationError_PerTag — три ветки `switch err.ActualTag()` (required/url/default) —
+// классы эквивалентности по тегу валидатора. Хвосты сообщений проверяются как substring,
+// поскольку они заданы в самом response.go.
 func TestValidationError_PerTag(t *testing.T) {
 	cases := []struct {
 		name        string

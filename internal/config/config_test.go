@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,9 +13,9 @@ import (
 
 func clearEnvVars(t *testing.T) {
 	t.Helper()
-	// Prevent loading any real .env file
+	// Не даём подгрузить настоящий .env в тесте.
 	t.Setenv("ENV_FILE", "/dev/null")
-	// Clear all config-related env vars to get defaults
+	// Чистим все env-переменные конфига, чтобы получить дефолты.
 	for _, key := range []string{
 		"ENV", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER",
 		"POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_SSL_MODE",
@@ -116,4 +118,99 @@ func TestLoadEnv_ValidFile(t *testing.T) {
 
 	assert.Equal(t, "hello", os.Getenv("TEST_LOAD_ENV_VAR"))
 	os.Unsetenv("TEST_LOAD_ENV_VAR")
+}
+
+// MustLoad использует log.Fatalf -> os.Exit(1), поэтому НЕ паникует и
+// assert.Panics его не ловит. Стандартный приём — re-exec тестового
+// бинаря в subprocess: запускаем helper-test с env-флагом и проверяем
+// ненулевой код выхода + сообщение в выводе.
+
+// TestMustLoad_FailLoudHelper — точка входа для subprocess. Запускается
+// только когда выставлен TEST_MUSTLOAD_FAIL_LOUD=1, иначе скипается.
+func TestMustLoad_FailLoudHelper(t *testing.T) {
+	if os.Getenv("TEST_MUSTLOAD_FAIL_LOUD") != "1" {
+		t.Skip("helper subprocess only — not run directly")
+	}
+	// В subprocess реальный .env подгружать не нужно.
+	os.Setenv("ENV_FILE", "/dev/null")
+	MustLoad()
+}
+
+// runMustLoadSubprocess re-execает текущий тестовый бинарь и запускает
+// только helper-test выше. Возвращает combined output и код выхода.
+func runMustLoadSubprocess(t *testing.T, env map[string]string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestMustLoad_FailLoudHelper$")
+	cmd.Env = append(os.Environ(), "TEST_MUSTLOAD_FAIL_LOUD=1")
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
+	} else if err != nil {
+		t.Fatalf("unexpected subprocess error: %v\noutput: %s", err, out)
+	}
+	return string(out), exitCode
+}
+
+// TestMustLoad_InvalidEnvVars — table-driven проверка fail-loud поведения
+// MustLoad для разных невалидных env-переменных. Один кейс — один env.
+//
+// Замечание про POSTGRES_PORT: поле объявлено как string, поэтому
+// envconfig принимает любое значение и MustLoad НЕ падает. Этот кейс
+// фиксирует фактическое поведение (shouldFail=false), чтобы будущий
+// рефакторинг типа поля в int обязательно зацепил тест.
+func TestMustLoad_InvalidEnvVars(t *testing.T) {
+	cases := []struct {
+		name       string
+		envKey     string
+		envValue   string
+		shouldFail bool   // ожидаем ли ненулевой exit code
+		wantInLog  string // подстрока, которая должна встретиться в выводе при fail
+	}{
+		{
+			name:       "HTTP_SERVER_TIMEOUT не парсится как time.Duration",
+			envKey:     "HTTP_SERVER_TIMEOUT",
+			envValue:   "not-a-duration",
+			shouldFail: true,
+			wantInLog:  "HTTP_SERVER_TIMEOUT",
+		},
+		{
+			name:       "HTTP_SERVER_IDLE_TIMEOUT не парсится как time.Duration",
+			envKey:     "HTTP_SERVER_IDLE_TIMEOUT",
+			envValue:   "not-a-duration",
+			shouldFail: true,
+			wantInLog:  "HTTP_SERVER_IDLE_TIMEOUT",
+		},
+		{
+			// Поле POSTGRES_PORT — string, поэтому envconfig валидацию не
+			// делает и MustLoad спокойно отрабатывает. Фиксируем это.
+			name:       "POSTGRES_PORT нечисловой — НЕ падает (поле string)",
+			envKey:     "POSTGRES_PORT",
+			envValue:   "not-a-number",
+			shouldFail: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, code := runMustLoadSubprocess(t, map[string]string{
+				tc.envKey: tc.envValue,
+			})
+			if tc.shouldFail {
+				assert.NotEqual(t, 0, code,
+					"MustLoad должен упасть с ненулевым кодом; output:\n%s", out)
+				assert.True(t,
+					strings.Contains(out, "Failed to process config") ||
+						strings.Contains(out, tc.wantInLog),
+					"в логе ожидалось упоминание ошибки/переменной %q; output:\n%s",
+					tc.wantInLog, out)
+			} else {
+				assert.Equal(t, 0, code,
+					"MustLoad НЕ должен падать на этом значении; output:\n%s", out)
+			}
+		})
+	}
 }

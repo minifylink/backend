@@ -104,9 +104,6 @@ func TestStatisticHandler_TableDriven(t *testing.T) {
 // TestStatisticHandler_EmptyShortID — два пути с одной целью:
 //  1. через chi-роутер: пустой short_id не матчится → 404 от роутера;
 //  2. при прямом вызове хэндлера (без chi): хэндлер сам отвечает "invalid request".
-//
-// Прежде это были два разных теста; объединение в один с двумя подкейсами
-// показывает, что речь об одном поведении в разных контекстах вызова.
 func TestStatisticHandler_EmptyShortID(t *testing.T) {
 	t.Run("via_router_returns_404", func(t *testing.T) {
 		r, _ := newRouter(t)
@@ -126,10 +123,8 @@ func TestStatisticHandler_EmptyShortID(t *testing.T) {
 	})
 }
 
-// TestStatisticHandler_ResponseFields — поля `clicks`, `devices`, `countries`
-// корректно сериализуются в JSON. Объединяет прежние три теста
-// (`_ReturnsClicks`, `_ReturnsDevices`, `_ReturnsCountries`) в один путь данных
-// с проверкой всех полей одновременно.
+// TestStatisticHandler_ResponseFields — поля clicks/devices/countries
+// одновременно сериализуются в JSON в одном пути данных.
 func TestStatisticHandler_ResponseFields(t *testing.T) {
 	mockResp := &repository.StatisticResponse{
 		Clicks:    42,
@@ -171,12 +166,8 @@ func TestStatisticHandler_ZeroClicks(t *testing.T) {
 	assert.Empty(t, got.Countries)
 }
 
-// TestStatisticHandler_ShortIDFormats — short_id с разной структурой,
-// все валидны с точки зрения хэндлера (он формат не валидирует, просто пробрасывает).
-// Объединяет прежние `_VeryLongShortID` и `_SpecialCharsInShortID`.
-//
-// Заметь: длина 100 здесь возможна именно потому, что хэндлер длину не валидирует.
-// На уровне БД (VARCHAR(20)) это упало бы — см. integration-тест.
+// TestStatisticHandler_ShortIDFormats — длинный/со спецсимволами short_id пробрасывается без валидации.
+// Реальное ограничение БД (VARCHAR(20)) проверяется в integration-тесте.
 func TestStatisticHandler_ShortIDFormats(t *testing.T) {
 	cases := []struct {
 		name string

@@ -253,8 +253,6 @@ func TestE2E_LocalClicks_AreReportedAsLocalCountry(t *testing.T) {
 // исправят (через `errors.As(&pgconn.PgError) + Code=="23505"` или
 // strings.Contains "duplicate key"), этот ассерт нужно поменять на
 // "shortID already exists" — и breaking change подсветит себя.
-//
-// Прежний тест проверял только NotEmpty(Error) и поэтому пропустил этот баг.
 func TestE2E_DuplicateShortID(t *testing.T) {
 	id := uniqueID("s6")
 
@@ -343,11 +341,8 @@ func TestE2E_AccumulatingStats(t *testing.T) {
 	assert.Equal(t, 5, stats.Clicks)
 }
 
-// Сценарий 10a/10b/10c: валидация данных при создании ссылки.
-//
-// Прежде это был ОДИН тест с тремя последовательными шагами; падение шага №2
-// маскировало результаты шага №3. Здесь — три независимых теста, каждый
-// проверяет один класс эквивалентности.
+// Сценарий 10a/10b/10c: валидация при создании ссылки — три независимых теста,
+// каждый проверяет один класс эквивалентности (изоляция: падение одного не маскирует другие).
 func TestE2E_CreateLink_InvalidURL(t *testing.T) {
 	id := uniqueID("s10a")
 	result := createLink(t, "not-a-url", id)
@@ -374,12 +369,8 @@ func TestE2E_CreateLink_ValidURL_AndRedirect(t *testing.T) {
 	assert.Equal(t, "https://google.com", resp.Header.Get("Location"))
 }
 
-// Сценарий 11: разные desktop-браузеры одинаково классифицируются как desktop.
-//
-// Прежнее имя `TestE2E_DifferentBrowsers` вводило в заблуждение: тест
-// проверял НЕ "разные браузеры в статистике" (поле devices хранит только
-// desktop/mobile, без browser), а то, что три desktop-UA дают devices.desktop=100%.
-// Новое имя честно отражает суть.
+// Сценарий 11: три разных desktop-UA → devices.desktop=100%
+// (поле devices хранит только desktop/mobile, без browser).
 func TestE2E_DesktopBrowsers_AllClassifiedAsDesktop(t *testing.T) {
 	id := uniqueID("s11")
 	createLink(t, "https://example.com", id)
